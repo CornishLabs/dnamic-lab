@@ -8,8 +8,8 @@
 
 import numpy as np
 
-import PyQt5  # ensure pyqtgraph binds to Qt6
-from PyQt5 import QtWidgets, QtCore, QtGui
+import PyQt6  # ensure pyqtgraph binds to Qt6
+from PyQt6 import QtWidgets, QtCore, QtGui
 
 
 import pyqtgraph as pg
