@@ -7,10 +7,16 @@
 # - autoscale uses min/max; histogram bounds stay in sync
 
 import numpy as np
+import importlib.util
 
-import PyQt6  # ensure pyqtgraph binds to Qt6
-from PyQt6 import QtWidgets, QtCore, QtGui
-
+if importlib.util.find_spec("PyQt6") is not None:
+    import PyQt6  # noqa: F401
+    from PyQt6 import QtWidgets, QtCore, QtGui
+elif importlib.util.find_spec("PyQt5") is not None:
+    import PyQt5  # noqa: F401
+    from PyQt5 import QtWidgets, QtCore, QtGui
+else:
+    raise ImportError("Need PyQt6 or PyQt5 installed")
 
 import pyqtgraph as pg
 from artiq.applets.simple import SimpleApplet

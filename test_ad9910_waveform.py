@@ -31,9 +31,9 @@ AMP = 0.5
 ATT = 6.0
 
 # Set to desired devices
-CPLD = "urukul0_cpld"
-DDS1 = "urukul0_ch0"
-DDS2 = "urukul0_ch1"
+CPLD = "urukul4_cpld"
+DDS1 = "urukul4_ch0"
+DDS2 = "urukul4_ch1"
 
 
 def io_update_device(cpld, *required_values, proto_rev=None):
