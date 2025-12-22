@@ -1,0 +1,50 @@
+{
+    "target": "kasli",
+    "variant": "du2509003",
+    "hw_rev": "v2.0",
+    "base": "satellite",
+    "peripherals": [
+        {
+            "type": "sampler",
+            "ports": [2, 3]
+        },
+        {
+            "type": "urukul",
+            "hw_rev": "v1.5",
+            "ports": [4, 5],
+            "clk_sel": 2,
+            "dds": "ad9910",
+            "synchronization": true
+        },
+        {
+            "type": "urukul",
+            "hw_rev": "v1.5",
+            "ports": [6, 7],
+            "clk_sel": 2,
+            "dds": "ad9910",
+            "synchronization": true
+        },
+        {
+            "type": "urukul",
+            "hw_rev": "v1.5",
+            "ports": [8, 9],
+            "clk_sel": 2,
+            "dds": "ad9910",
+            "synchronization": true
+        },
+        {
+            "type": "dio",
+            "ports": [0],
+            "bank_direction_low": "output",
+            "bank_direction_high": "output",
+            "edge_counter": false
+        },
+        {
+            "type": "dio",
+            "ports": [1],
+            "bank_direction_low": "output",
+            "bank_direction_high": "output",
+            "edge_counter": false
+        }
+   ]
+}
