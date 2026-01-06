@@ -6,7 +6,7 @@ import sys
 import sipyco.common_args as sca
 from sipyco.pc_rpc import simple_server_loop
 
-from andor_emccd_driver import AndorEMCCD
+from .andor_emccd_driver import AndorEMCCD
 
 logger = logging.getLogger(__name__)
 
