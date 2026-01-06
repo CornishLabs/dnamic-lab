@@ -1,0 +1,16 @@
+[project]
+name = "andor-camera"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "pyandorsdk2",
+    "pyqt6>=6.10.1",
+    "sipyco",
+]
+
+[tool.uv.sources]
+sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
+pyandorsdk2 = { path = "../../../../software-downloads/AndorLinuxSDK/andor/python/pyAndorSDK2" }
