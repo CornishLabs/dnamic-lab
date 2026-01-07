@@ -62,7 +62,7 @@ device_db = {
         "host": "127.0.0.1",
         "port": 4010,
         "target_name": "camera",
-        "command": "aqctl-andor-emccd-wrapped -p {port}",
+        "command": "aqctl_andor_emccd -p {port}",
     },
     "andor": {
         "type": "local",

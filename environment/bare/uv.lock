@@ -158,7 +158,7 @@ dependencies = [
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'tools'" },
     { name = "numpy" },
-    { name = "pyandorsdk2", directory = "../../../software-downloads/AndorLinuxSDK/andor/python/pyAndorSDK2" },
+    { name = "pyandorsdk2", directory = "../../../install/pyAndorSDK2" },
     { name = "pyqt6", marker = "extra == 'tools'" },
     { name = "sipyco", git = "https://git.m-labs.hk/M-Labs/sipyco.git" },
 ]
@@ -330,7 +330,7 @@ wheels = [
 [[package]]
 name = "pyandorsdk2"
 version = "1.2.0"
-source = { directory = "../../../software-downloads/AndorLinuxSDK/andor/python/pyAndorSDK2" }
+source = { directory = "../../../install/pyAndorSDK2" }
 dependencies = [
     { name = "cffi" },
     { name = "numpy" },

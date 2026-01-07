@@ -257,9 +257,11 @@ name = "dnamic-andor-host"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pyandorsdk2" },
+    { name = "pyqt6" },
     { name = "sipyco" },
 ]
 
@@ -271,9 +273,11 @@ tools = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "matplotlib", marker = "extra == 'tools'" },
     { name = "numpy" },
-    { name = "pyandorsdk2", directory = "../../../../software-downloads/AndorLinuxSDK/andor/python/pyAndorSDK2" },
+    { name = "pyandorsdk2", directory = "../../../../install/pyAndorSDK2" },
+    { name = "pyqt6", specifier = ">=6.10.1" },
     { name = "pyqt6", marker = "extra == 'tools'" },
     { name = "sipyco", git = "https://git.m-labs.hk/M-Labs/sipyco.git" },
 ]
@@ -776,7 +780,7 @@ wheels = [
 [[package]]
 name = "pyandorsdk2"
 version = "1.2.0"
-source = { directory = "../../../../software-downloads/AndorLinuxSDK/andor/python/pyAndorSDK2" }
+source = { directory = "../../../../install/pyAndorSDK2" }
 dependencies = [
     { name = "cffi" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },

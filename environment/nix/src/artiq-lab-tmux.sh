@@ -33,8 +33,8 @@ Usage:
 
 Controls:
   SESSION, REPO_ROOT, SCRATCH_DIR, WAIT, MASTER_READY_TIMEOUT
-  VENV_NAME (default: artiq-master-dev)
-  VENV_PATH (override full venv path; default: $SCRATCH_DIR/nix-artiq-venvs/$VENV_NAME)
+  VENV_NAME (default: artiq-nix-dev)
+  VENV_PATH (override full venv path; default: $SCRATCH_DIR/virtualenvs/$VENV_NAME)
 
 Notes:
   - If session already exists, it will NOT restart running programs.
@@ -52,8 +52,40 @@ fi
 
 SESSION="${SESSION:-artiq}"
 REPO_ROOT="${REPO_ROOT:-$PWD}"
-: "${SCRATCH_DIR:=$HOME/scratch}"
+: "${SCRATCH_DIR:=$HOME/artiq-files/install}"
 : "${WAIT:=5}"
+
+NIX_DIR="${NIX_DIR:-$REPO_ROOT/environment/nix}"
+if [[ ! -f "$NIX_DIR/flake.nix" ]]; then
+  echo "Error: expected flake at $NIX_DIR/flake.nix" >&2
+  exit 1
+fi
+command -v nix >/dev/null 2>&1 || { echo "Error: nix not on PATH" >&2; exit 1; }
+
+# Build PYTHONPATH for master so it can import mediators (src-layout)
+PYTHONPATH_MASTER=""
+append_path() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  if [[ -z "$PYTHONPATH_MASTER" ]]; then
+    PYTHONPATH_MASTER="$dir"
+  else
+    PYTHONPATH_MASTER="$dir:$PYTHONPATH_MASTER"
+  fi
+}
+
+append_path "$REPO_ROOT/repository"
+for d in "$REPO_ROOT"/ndsps/*/artiq/src; do
+  append_path "$d"
+done
+export PYTHONPATH_MASTER
+
+VENV_ACTIVATE="$SCRATCH_DIR/virtualenvs/artiq-nix-dev/bin/activate"
+if [[ ! -f "$VENV_ACTIVATE" ]]; then
+  echo "Error: expected nested venv at $VENV_ACTIVATE" >&2
+  echo "Run an interactive 'nix develop' once to create it." >&2
+  exit 1
+fi
 
 # Stable tmux socket path (avoid /tmp staleness)
 SOCK_DIR="${XDG_RUNTIME_DIR:-$SCRATCH_DIR/.run}"
@@ -82,34 +114,33 @@ prepend_unique "$REPO_ROOT" PYTHONPATH
 export PYTHONPATH
 
 # --- Venv resolution (robust: use absolute venv python for ARTIQ processes) ---
-VENV_NAME="${VENV_NAME:-artiq-master-dev}"
-VENV_PATH="${VENV_PATH:-$SCRATCH_DIR/nix-artiq-venvs/$VENV_NAME}"
+VENV_NAME="${VENV_NAME:-artiq-nix-dev}"
+VENV_PATH="${VENV_PATH:-$SCRATCH_DIR/virtualenvs/$VENV_NAME}"
 export VENV_PATH
 
 # --- Bare venv for controller manager ---
-BARE_ENV_DIR="${BARE_ENV_DIR:-$REPO_ROOT/environment/bare}"
-BARE_VENV_PATH="${BARE_VENV_PATH:-$BARE_ENV_DIR/.venv}"
+BARE_VENV_PATH="${BARE_VENV_PATH:-$HOME/artiq-files/install/virtualenvs/controller_manager}"
 
 if [[ ! -x "$BARE_VENV_PATH/bin/artiq_ctlmgr" ]]; then
   echo "Error: bare ctlmgr venv missing: $BARE_VENV_PATH/bin/artiq_ctlmgr" >&2
-  echo "Fix: cd $BARE_ENV_DIR && uv sync" >&2
   exit 1
 fi
+
 
 # Prefer the active venv if present (best signal that you're in nix develop + shellHook)
-if [[ -n "${VIRTUAL_ENV-}" ]]; then
-  VENV_PATH="$VIRTUAL_ENV"
-  export VENV_PATH
-fi
+# if [[ -n "${VIRTUAL_ENV-}" ]]; then
+#   VENV_PATH="$VIRTUAL_ENV"
+#   export VENV_PATH
+# fi
 
-if [[ ! -x "$VENV_PATH/bin/python" ]]; then
-  echo "Error: expected venv python at: $VENV_PATH/bin/python" >&2
-  echo "Run this inside 'nix develop' (so the shellHook creates/activates the venv), or set VENV_PATH." >&2
-  exit 1
-fi
+# if [[ ! -x "$VENV_PATH/bin/python" ]]; then
+#   echo "Error: expected venv python at: $VENV_PATH/bin/python" >&2
+#   echo "Run this inside 'nix develop' (so the shellHook creates/activates the venv), or set VENV_PATH." >&2
+#   exit 1
+# fi
 
-PY="$VENV_PATH/bin/python"
-export ARTIQ_PY="$PY"
+# PY="$VENV_PATH/bin/python"
+# export ARTIQ_PY="$PY"
 
 # Refuse to touch non-sockets
 if [[ -e "$SOCK" && ! -S "$SOCK" ]]; then
@@ -125,29 +156,46 @@ if [[ -S "$SOCK" ]] && ! "${TMUX[@]}" -q list-sessions >/dev/null 2>&1; then
 fi
 
 # Commands (use venv python explicitly)
-CMD_MASTER=( "$PY" -u -m artiq.frontend.artiq_master )
-CMD_DASH=(   "$PY"    -m artiq.frontend.artiq_dashboard -p ndscan.dashboard_plugin )
-
 MASTER_HOST="${MASTER_HOST:-127.0.0.1}"
 
+CMD_MASTER=(
+  nix develop "$NIX_DIR" --command
+  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_MASTER"
+  bash -lc "source '$VENV_ACTIVATE' && exec python -u -m artiq.frontend.artiq_master"
+)
+
+CMD_DASH=(
+  nix develop "$NIX_DIR" --command
+  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_MASTER"
+  bash -lc "source '$VENV_ACTIVATE' && exec python -m artiq.frontend.artiq_dashboard -p ndscan.dashboard_plugin"
+)
+
+CMD_JANITOR=(
+  nix develop "$NIX_DIR" --command
+  env PYTHONUNBUFFERED=1
+  bash -lc "source '$VENV_ACTIVATE' && exec ndscan_dataset_janitor"
+)
+
+# ctlmgr: run in bare venv, and do NOT inherit nix PYTHONPATH etc.
 CMD_CTLMGR=(
-  bash -lc
-  "source '$BARE_VENV_PATH/bin/activate' && exec artiq_ctlmgr -s '$MASTER_HOST'"
+  bash -c
+  "unset PYTHONPATH PYTHONHOME VIRTUAL_ENV;
+   source '$BARE_VENV_PATH/bin/activate';
+   exec artiq_ctlmgr -s '$MASTER_HOST'"
 )
 
 
-# Prefer janitor entrypoint from venv if it exists
-if [[ -x "$VENV_PATH/bin/ndscan_dataset_janitor" ]]; then
-  CMD_JANITOR=( "$VENV_PATH/bin/ndscan_dataset_janitor" )
-else
-  CMD_JANITOR=( ndscan_dataset_janitor )
-fi
+# push_env() {
+#   # Push “what nix develop gave us” into tmux, so new panes inherit it.
+#   for VAR in PYTHONPATH SCRATCH_DIR QT_PLUGIN_PATH QML2_IMPORT_PATH \
+#              VIRTUAL_ENV PATH PYTHONUNBUFFERED IN_NIX_SHELL \
+#              VENV_PATH ARTIQ_PY; do
+#     [[ -n "${!VAR-}" ]] && "${TMUX[@]}" setenv -g "$VAR" "${!VAR}"
+#   done
+# }
 
 push_env() {
-  # Push “what nix develop gave us” into tmux, so new panes inherit it.
-  for VAR in PYTHONPATH SCRATCH_DIR QT_PLUGIN_PATH QML2_IMPORT_PATH \
-             VIRTUAL_ENV PATH PYTHONUNBUFFERED IN_NIX_SHELL \
-             VENV_PATH ARTIQ_PY; do
+  for VAR in SCRATCH_DIR REPO_ROOT MASTER_HOST PYTHONUNBUFFERED; do
     [[ -n "${!VAR-}" ]] && "${TMUX[@]}" setenv -g "$VAR" "${!VAR}"
   done
 }
@@ -180,7 +228,8 @@ printf "IN_NIX_SHELL=%s\n" "${IN_NIX_SHELL-}"
 printf "SCRATCH_DIR=%s\n" "${SCRATCH_DIR-}"
 printf "VENV_PATH=%s\n" "${VENV_PATH-}"
 printf "VIRTUAL_ENV=%s\n" "${VIRTUAL_ENV-}"
-printf "ARTIQ_PY=%s\n" "${ARTIQ_PY-}"
+printf "python(PATH)="; command -v python 2>/dev/null || echo "not-found"
+python -c 'import sys; print("sys.executable:", sys.executable)' 2>/dev/null || true
 printf "PYTHONPATH=%s\n" "${PYTHONPATH-}"
 printf "PATH=%s\n" "${PATH-}"
 printf "python(PATH)="; command -v python 2>/dev/null || echo "not-found"
@@ -281,7 +330,7 @@ fi
 
 if should_start "$created_shell"; then
   "${TMUX[@]}" respawn-pane -k -t "$SESSION:shell" -c "$REPO_ROOT" \
-    bash --rcfile "$SHELL_RC" -i
+    bash -lc "cd '$REPO_ROOT' && nix develop '$NIX_DIR'"
 fi
 
 # Attach / switch

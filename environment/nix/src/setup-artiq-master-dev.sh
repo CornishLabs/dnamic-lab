@@ -35,8 +35,8 @@ nix_python_root=$1
 nix_site_pkgs_subdir=$2
 
 # Create/activate venv.
-venv_root="${SCRATCH_DIR}/nix-artiq-venvs"
-venv_name="artiq-master-dev"
+venv_root="${SCRATCH_DIR}/virtualenvs"
+venv_name="artiq-nix-dev"
 venv_path="${venv_root}/${venv_name}"
 if [[ -d "${venv_path}" ]]; then
     diag "Using existing Python venv: ${venv_path}."
@@ -93,16 +93,16 @@ else
         python -m venv "${venv_path}"
         printf """
 Created nested Python virtual environment (venv). ARTIQ itself and commonly
-used packages such as ${blue}ndscan${reset}, ${blue}oitg${reset} and ${blue}oxart${reset} are already installed via Nix,
+used packages such as ${blue}ndscan${reset}, ${blue}oitg${reset} are probably installed via Nix,
 but additional packages not distributed via Nix can be installed using ${blue}pip${reset}
 as usual.
 
 This can be particularly useful to install packages in development mode while
 actively working on code (e.g. in ndscan). For instance, after cloning the
-ndscan repository to ~/scratch/ndscan, installing it in development mode using
-    ${blue}pip install --config-settings editable_mode=compat -e ~/scratch/ndscan${reset}
+ndscan repository to ~/artiq-files/install/ndscan, installing it in development mode using
+    ${blue}pip install --config-settings editable_mode=compat -e ~/artiq-files/install/ndscan${reset}
 will take precedence over the Nix-provided version inside this environment,
-such that changes to the code in ~/scratch/ndscan immediately take effect.
+such that changes to the code in ~/artiq-files/install/ndscan immediately take effect.
 (The ${grey}--config-settings editable_mode=compat${reset} argument is necessary
 for the installation to take precedence over the Nix-provided packages with
 recent versions of setuptools.)
@@ -113,7 +113,7 @@ activate the venv outside of Nix, nor deactivate the venv while in the Nix shell
 
 The venv directory ${blue}${venv_path}${reset} is not
 managed by Nix and persists across ${blue}nix develop${reset} invocations. To revert all
-libraries to the versions specified in the ${blue}nix-dnamic${reset} flake (and remove any
+libraries to the versions specified in the ${blue}dnamic-lab/environment/nix${reset} flake (and remove any
 additionally installed libraries), simply delete the directory; it will be
 re-created on the next ${blue}nix develop${reset} run.
 

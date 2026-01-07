@@ -20,45 +20,35 @@
         text = builtins.readFile ./src/artiq-lab-tmux.sh;
       };
 
-      aqctl-andor-wrapper = pkgs.writeShellApplication {
-        name = "aqctl-andor-emccd-wrapped";
-        runtimeInputs = [ pkgs.libxml2 ]; # The camera needs this
-        text = ''
-          set -euo pipefail
-
-          # Vendor lib (Andor so)
-          ANDOR_LIB=/usr/local/lib
-
-          # Nix-provided deps for those vendor libs
-          NIX_LIBS="${pkgs.lib.makeLibraryPath [ pkgs.libxml2 ]}"
-
-          export LD_LIBRARY_PATH="$ANDOR_LIB:$NIX_LIBS''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
-          # Use whichever python is first on PATH (your activated venv inside nix shell)
-          exec python -m dnamic_andor_host.aqctl_andor_emccd "$@"
-        '';
-      };
-
       artiq-master-dev = pkgs.mkShell {
         name = "artiq-master-dev";
         buildInputs = [ 
           python-env
           artiq-lab-tmux
-          aqctl-andor-wrapper
         ];
-        shellHook = ''
-          if [ -z "$SCRATCH_DIR" ]; then
-            echo "SCRATCH_DIR environment variable not set, defaulting to ~/scratch."
-            export SCRATCH_DIR=$HOME/scratch
-            export QT_PLUGIN_PATH=${pkgs.qt5.qtbase}/${pkgs.qt5.qtbase.dev.qtPluginPrefix}
-            export QML2_IMPORT_PATH=${pkgs.qt5.qtbase}/${pkgs.qt5.qtbase.dev.qtQmlPrefix}
-          fi
-          ${
-            ./src/setup-artiq-master-dev.sh
-          } ${python-env} ${python-env.sitePackages} || exit 1
-          source $SCRATCH_DIR/nix-artiq-venvs/artiq-master-dev/bin/activate || exit 1
-          export PYTHONPATH="''${SCRATCH_DIR:-}''${PYTHONPATH:+:$PYTHONPATH}"
-        '';
+      shellHook = ''
+        if [ -z "$SCRATCH_DIR" ]; then
+          echo "SCRATCH_DIR environment variable not set, defaulting to ~/artiq-files/install."
+          export SCRATCH_DIR=$HOME/artiq-files/install
+        fi
+
+        export QT_PLUGIN_PATH=${pkgs.qt5.qtbase}/${pkgs.qt5.qtbase.dev.qtPluginPrefix}
+        export QML2_IMPORT_PATH=${pkgs.qt5.qtbase}/${pkgs.qt5.qtbase.dev.qtQmlPrefix}
+
+        # Only do nested venv setup when interactive.
+        # This keeps `nix develop --command ...` non-blocking.
+        case "$-" in
+          *i*)
+            ${
+              ./src/setup-artiq-master-dev.sh
+            } ${python-env} ${python-env.sitePackages} || exit 1
+            source $SCRATCH_DIR/virtualenvs/artiq-nix-dev/bin/activate || exit 1
+            export PYTHONPATH="''${SCRATCH_DIR:-}''${PYTHONPATH:+:$PYTHONPATH}"
+            ;;
+          *)
+            ;;
+        esac
+      '';
       };
   in {
     inherit artiq-master-dev;
