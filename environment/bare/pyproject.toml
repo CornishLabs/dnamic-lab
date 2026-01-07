@@ -17,4 +17,4 @@ package = false
 [tool.uv.sources]
 artiq-comtools = { git = "https://git.m-labs.hk/M-Labs/artiq-comtools.git" }
 sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
-dnamic-andor-host = { path = "../../ndsps/andor-camera/host" }
+dnamic-andor-host = { path = "../../ndsps/andor-camera/host" , editable = true}

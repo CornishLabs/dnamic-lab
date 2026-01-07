@@ -6,14 +6,14 @@ class TTL_Output_On_Off_Pulse(EnvExperiment):
 
     def build(self):
         self.setattr_device("core")
-        self.setattr_device("ttl17")
+        self.setattr_device("ttl0")
 
     @kernel
     def run(self):
         self.core.reset()
-        self.ttl17.output()
+        self.ttl0.output()
 
         delay(20 * us)
-        self.ttl17.on()
+        self.ttl0.on()
         delay(5 * ms)
-        self.ttl17.off()
+        self.ttl0.off()

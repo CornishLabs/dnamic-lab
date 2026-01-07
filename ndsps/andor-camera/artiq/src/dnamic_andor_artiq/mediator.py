@@ -83,10 +83,9 @@ class AndorCamera:
           host: wait and fetch image
         """
         # Ensure RTIO timeline is in a sane state before kernel actions
-        self.core.break_realtime()
-
         self.arm()
 
+        self.core.break_realtime()
         # Deterministic exposure timing on RTIO
         self.ttl_expose(exposure_s)
 

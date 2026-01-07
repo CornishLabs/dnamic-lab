@@ -19,7 +19,7 @@ class SimpleCameraTest(EnvExperiment):
 
         # Configure camera for a single image
         print("Configuring ROI/exposure...")
-        c.set_trigger_mode(0) # 0=internal
+        c.set_trigger_mode(0) # 0=internal, 6 = External start, 7 = External exposure
         c.set_image_region(*ROI)
         c.set_exposure_time(float(EXPOSURE_S))
 
@@ -31,4 +31,7 @@ class SimpleCameraTest(EnvExperiment):
 
         print(f"Got image: shape={img.shape} dtype={img.dtype} bytes={img.nbytes}")
         print("Saving to dataset")
-        self.set_dataset("andor.image", img, broadcast=True)
+        self.set_dataset("andor.image", img, broadcast=True)    
+
+        print("Aborting Acquisition")
+        c.abort_acquisition()

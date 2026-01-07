@@ -176,6 +176,14 @@ class AndorEMCCD:
                 return
             ret = self._sdk.SetTriggerMode(int(mode))
             self._check(ret, "SetTriggerMode")
+    
+    def set_fast_ext_trigger(self, mode: int) -> None:
+        with self._lock:
+            self._require_init()
+            if self.simulation:
+                return
+            ret = self._sdk.SetFastExtTrigger(int(mode))
+            self._check(ret, "SetFastExtTrigger")
 
     def set_exposure_time(self, exposure_s: float) -> None:
         with self._lock:
@@ -227,17 +235,26 @@ class AndorEMCCD:
             ret = self._sdk.StartAcquisition()
             self._check(ret, "StartAcquisition")
 
+    def abort_acquisition(self) -> None:
+        with self._lock:
+            self._require_init()
+            if self.simulation:
+                return
+            ret = self._sdk.AbortAcquisition()
+            self._check(ret, "AbortAcquisition")
+
     def wait(self) -> None:
         """
         Blocks until acquisition completes.
         In production you may prefer a timeout-based wait to avoid deadlocks if triggers stop.
+        200ms timeout.
         """
         with self._lock:
             self._require_init()
             if self.simulation:
                 return
-            ret = self._sdk.WaitForAcquisition()
-            self._check(ret, "WaitForAcquisition")
+            ret = self._sdk.WaitForAcquisitionTimeOut(5000)
+            self._check(ret, "WaitForAcquisitionTimeOut")
 
     def get_image16(self) -> np.ndarray:
         """
