@@ -57,23 +57,23 @@ device_db = {
         "class": "I2CSwitch",
         "arguments": {"address": 0xe2}
     },
-    # "andor_ctrl": {
-    #     "type": "controller",
-    #     "host": "127.0.0.1",
-    #     "port": 4010,
-    #     "target_name": "camera",
-    #     "command": "/home/lab/artiq-files/dnamic-lab/ndsps/andor-camera/host/run_aqctl_andor_emccd -p {port}",
-    # },
-    # "andor": {
-    #     "type": "local",
-    #     "module": "dnamic_andor_artiq.mediator",
-    #     "class": "AndorCamera",
-    #     "arguments": {
-    #         "camera": "andor_ctrl",
-    #         "exposure_ttl": "ttl0",
-    #         "core": "core",
-    #     },
-    # },
+    "andor_ctrl": {
+        "type": "controller",
+        "host": "127.0.0.1",
+        "port": 4010,
+        "target_name": "camera",
+        "command": "/home/lab/artiq-files/dnamic-lab/ndsps/andor-camera/host/run_aqctl_andor_emccd -p {port}",
+    },
+    "andor": {
+        "type": "local",
+        "module": "dnamic_andor_artiq.mediator",
+        "class": "AndorCamera",
+        "arguments": {
+            "camera": "andor_ctrl",
+            "exposure_ttl": "ttl0",
+            "core": "core",
+        },
+    },
 }
 
 # master peripherals
