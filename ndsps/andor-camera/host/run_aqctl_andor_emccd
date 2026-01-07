@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VENV="$HOME/artiq-files/install/virtualenvs/controller_manager"  # or wherever it lives
+PY="$VENV/bin/python"
+
+# Avoid “leaking” nix/python env into the controller process
+unset PYTHONPATH PYTHONHOME VIRTUAL_ENV
+
+# Vendor libraries (Andor)
+export LD_LIBRARY_PATH="/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# If you need extra system libs explicitly, add them here too, e.g.
+# export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+exec "$PY" -m dnamic_andor_host.aqctl_andor_emccd "$@"

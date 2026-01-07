@@ -119,13 +119,21 @@ VENV_PATH="${VENV_PATH:-$SCRATCH_DIR/virtualenvs/$VENV_NAME}"
 export VENV_PATH
 
 # --- Bare venv for controller manager ---
-BARE_VENV_PATH="${BARE_VENV_PATH:-$HOME/artiq-files/install/virtualenvs/controller_manager}"
+# BARE_VENV_PATH="${BARE_VENV_PATH:-$HOME/artiq-files/install/virtualenvs/controller_manager}"
 
-if [[ ! -x "$BARE_VENV_PATH/bin/artiq_ctlmgr" ]]; then
-  echo "Error: bare ctlmgr venv missing: $BARE_VENV_PATH/bin/artiq_ctlmgr" >&2
+# if [[ ! -x "$BARE_VENV_PATH/bin/artiq_ctlmgr" ]]; then
+#   echo "Error: bare ctlmgr venv missing: $BARE_VENV_PATH/bin/artiq_ctlmgr" >&2
+#   exit 1
+# fi
+
+ARTIQ_PY="$VENV_PATH/bin/python"
+if [[ ! -x "$ARTIQ_PY" ]]; then
+  echo "Error: expected venv python at $ARTIQ_PY" >&2
   exit 1
 fi
 
+PYTHONPATH_RUN="$PYTHONPATH_MASTER${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH_RUN
 
 # Prefer the active venv if present (best signal that you're in nix develop + shellHook)
 # if [[ -n "${VIRTUAL_ENV-}" ]]; then
@@ -160,29 +168,28 @@ MASTER_HOST="${MASTER_HOST:-127.0.0.1}"
 
 CMD_MASTER=(
   nix develop "$NIX_DIR" --command
-  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_MASTER"
-  bash -lc "source '$VENV_ACTIVATE' && exec python -u -m artiq.frontend.artiq_master"
+  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_RUN"
+  "$ARTIQ_PY" -u -m artiq.frontend.artiq_master
 )
 
-CMD_DASH=(
+CMD_CTLMGR=(
   nix develop "$NIX_DIR" --command
-  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_MASTER"
-  bash -lc "source '$VENV_ACTIVATE' && exec python -m artiq.frontend.artiq_dashboard -p ndscan.dashboard_plugin"
+  env PYTHONUNBUFFERED=1
+  "$ARTIQ_PY" -u -m artiq_comtools.artiq_ctlmgr -s "$MASTER_HOST"
 )
 
 CMD_JANITOR=(
   nix develop "$NIX_DIR" --command
   env PYTHONUNBUFFERED=1
-  bash -lc "source '$VENV_ACTIVATE' && exec ndscan_dataset_janitor"
+  ndscan_dataset_janitor
 )
 
-# ctlmgr: run in bare venv, and do NOT inherit nix PYTHONPATH etc.
-CMD_CTLMGR=(
-  bash -c
-  "unset PYTHONPATH PYTHONHOME VIRTUAL_ENV;
-   source '$BARE_VENV_PATH/bin/activate';
-   exec artiq_ctlmgr -s '$MASTER_HOST'"
+CMD_DASH=(
+  nix develop "$NIX_DIR" --command
+  env PYTHONUNBUFFERED=1 PYTHONPATH="$PYTHONPATH_RUN"
+  "$ARTIQ_PY" -u -m artiq.frontend.artiq_dashboard -p ndscan.dashboard_plugin
 )
+
 
 
 # push_env() {
@@ -195,7 +202,7 @@ CMD_CTLMGR=(
 # }
 
 push_env() {
-  for VAR in SCRATCH_DIR REPO_ROOT MASTER_HOST PYTHONUNBUFFERED; do
+  for VAR in SCRATCH_DIR REPO_ROOT MASTER_HOST PYTHONUNBUFFERED NIX_DIR; do
     [[ -n "${!VAR-}" ]] && "${TMUX[@]}" setenv -g "$VAR" "${!VAR}"
   done
 }
