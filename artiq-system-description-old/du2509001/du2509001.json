@@ -3,7 +3,6 @@
     "variant": "du2509001",
     "hw_rev": "v1.1",
     "base": "master",
-    "core_addr": "192.168.88.2",
     "peripherals": [
         {
             "type": "sampler",
@@ -12,14 +11,14 @@
         {
             "type": "dio",
             "ports": [2],
-            "bank_direction_low": "output",
-            "bank_direction_high": "output",
-            "edge_counter": false
+            "bank_direction_low": "input",
+            "bank_direction_high": "input",
+            "edge_counter": true
         },
         {
             "type": "dio",
             "ports": [3],
-            "bank_direction_low": "output",
+            "bank_direction_low": "input",
             "bank_direction_high": "input",
             "edge_counter": true
         },

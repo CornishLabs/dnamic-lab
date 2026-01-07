@@ -1,0 +1,20 @@
+[project]
+name = "controller-manager"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "artiq-comtools",
+    "dnamic-andor-host",
+    "numpy>=2.4.0",
+    "pybase64>=1.4.3",
+    "sipyco",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+artiq-comtools = { git = "https://git.m-labs.hk/M-Labs/artiq-comtools.git" }
+sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
+dnamic-andor-host = { path = "../../ndsps/andor-camera/host" }

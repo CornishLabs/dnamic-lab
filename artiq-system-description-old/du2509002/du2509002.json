@@ -7,16 +7,16 @@
         {
             "type": "dio",
             "ports": [0],
-            "bank_direction_low": "output",
-            "bank_direction_high": "output",
-            "edge_counter": false
+            "bank_direction_low": "input",
+            "bank_direction_high": "input",
+            "edge_counter": true
         },
         {
             "type": "dio",
             "ports": [1],
-            "bank_direction_low": "output",
-            "bank_direction_high": "output",
-            "edge_counter": false
+            "bank_direction_low": "input",
+            "bank_direction_high": "input",
+            "edge_counter": true
         },
         {
             "type": "suservo",
