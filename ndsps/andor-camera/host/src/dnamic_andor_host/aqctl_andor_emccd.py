@@ -31,6 +31,7 @@ def main():
     args = get_argparser().parse_args()
     sca.init_logger_from_args(args)
 
+    logger.info("Starting camera initialisation")
     cam = AndorEMCCD(config_path=args.config_path, simulation=args.simulation)
     cam.connect()
     logger.info("Connected to camera. serial=%s sim=%s", cam.get_serial() if not args.simulation else "SIM", args.simulation)
