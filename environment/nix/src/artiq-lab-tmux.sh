@@ -175,7 +175,7 @@ CMD_MASTER=(
 CMD_CTLMGR=(
   nix develop "$NIX_DIR" --command
   env PYTHONUNBUFFERED=1
-  "$ARTIQ_PY" -u -m artiq_comtools.artiq_ctlmgr -s "$MASTER_HOST"
+  "$ARTIQ_PY" -u -m artiq_comtools.artiq_ctlmgr -v
 )
 
 CMD_JANITOR=(
