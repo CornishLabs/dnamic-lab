@@ -1,0 +1,4 @@
+# Ignore result directories
+**/result
+**/artiq_kasli
+*/**/device_db.py
