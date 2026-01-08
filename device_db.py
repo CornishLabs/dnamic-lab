@@ -62,7 +62,7 @@ device_db = {
         "host": "::1",
         "port": 4010,
         "target_name": "camera",
-        "command": "/home/lab/artiq-files/dnamic-lab/ndsps/andor-camera/host/run_aqctl_andor_emccd -vv -p {port} --bind {bind}",
+        "command": "/home/lab/artiq-files/dnamic-lab/ndsps/andor-camera/host/run_aqctl_andor_emccd -v -p {port} --bind {bind}",
     },
     "andor": {
         "type": "local",
