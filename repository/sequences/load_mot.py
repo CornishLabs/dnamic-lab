@@ -87,11 +87,12 @@ class LoadRbMOT(ExpFragment):
         # Device drivers
         self.setattr_device("core")
         self.setattr_device("andor_ctrl")
-        self.camera_trigger = self.get_device("ttl_camera_exposure")
+        
+        self.setattr_device("ttl_camera_exposure")
 
-        self.rb_cool_dds = self.get_device("dds_ch_rb_cool")
-        self.rb_repump_dds = self.get_device("dds_ch_rb_repump")
-        self.rb_dds_cpld = self.get_device("dds_cpld_rb")
+        self.setattr_device("dds_ch_rb_cool")
+        self.setattr_device("dds_ch_rb_repump")
+        self.setattr_device("dds_cpld_rb")
 
         self.setattr_device("zotino0")
     
@@ -100,16 +101,16 @@ class LoadRbMOT(ExpFragment):
 
         delay(2*ms)
         # Initialise CPLDs on Urukuls (DDS cards)
-        for cpld in [self.rb_dds_cpld]:
+        for cpld in [self.dds_cpld_rb]:
             cpld.init()
         
         # Initialise DDS Channels on Urukuls
-        for dds in [self.rb_cool_dds, self.rb_repump_dds]:
+        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
             dds.init()
 
         for dds, freq, amp, att in [
-            (self.rb_cool_dds, self.cool_frequency.get(), self.cool_dds_amp.get(), self.cool_dds_att.get()),
-            (self.rb_repump_dds, self.repump_frequency.get(), self.repump_dds_amp.get(), self.repump_dds_att.get()),
+            (self.dds_ch_rb_cool, self.cool_frequency.get(), self.cool_dds_amp.get(), self.cool_dds_att.get()),
+            (self.dds_ch_rb_repump, self.repump_frequency.get(), self.repump_dds_amp.get(), self.repump_dds_att.get()),
             ]:
             dds.sw.off()
             dds.set(freq, amplitude=amp)
@@ -149,17 +150,17 @@ class LoadRbMOT(ExpFragment):
         )
 
         # Turn RF switches on to turn AOMs on
-        for dds in [self.rb_cool_dds, self.rb_repump_dds]:
+        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
             dds.sw.on()
 
         # Hold output on for desired preload time
         delay(self.preload_time.get())
 
         # Pulse the exposure (adds to the timeline)
-        self.camera_trigger.pulse(self.exposure_time.get())
+        self.ttl_camera_exposure.pulse(self.exposure_time.get())
 
         # Turn RF off
-        for dds in [self.rb_cool_dds, self.rb_repump_dds]:
+        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
             dds.sw.off()
 
         # Turn Quad off (Leave shims so field null)
