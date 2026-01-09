@@ -3,7 +3,7 @@
 This file elucidates various flows of data within the ndscan framework.
 
 A generic Artiq experiment looks like:
-```
+```python
 from artiq.experiment import *     
 
 class SetLED(EnvExperiment):
@@ -16,8 +16,7 @@ class SetLED(EnvExperiment):
     @kernel
     def run(self):  
         self.core.reset()
-        if self.state:                                     
-          self.led1.on() # Connected to L1 on front panel of Kasli SOC
+        self.led1.set_o(self.state) # Connected to L1 on front panel of Kasli SOC
 ```
 An `EnvExperiment` is one which is both an `Experiment`, and `HasEnvironment`.
 An `Experiment` says you must create `prepare()`, `run()`, `analyse()` methods.
