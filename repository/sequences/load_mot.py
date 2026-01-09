@@ -87,11 +87,11 @@ class LoadRbMOT(ExpFragment):
         # Device drivers
         self.setattr_device("core")
         self.setattr_device("andor_ctrl")
-        self.camera_trigger = self.get_device("ttl0")
-        
-        self.rb_cool_dds = self.get_device("urukul5_ch0")
-        self.rb_repump_dds = self.get_device("urukul5_ch1")
-        self.rb_dds_cpld = self.get_device("urukul5_cpld")
+        self.camera_trigger = self.get_device("ttl_camera_exposure")
+
+        self.rb_cool_dds = self.get_device("dds_ch_rb_cool")
+        self.rb_repump_dds = self.get_device("dds_ch_rb_repump")
+        self.rb_dds_cpld = self.get_device("dds_cpld_rb")
 
         self.setattr_device("zotino0")
     
