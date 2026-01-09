@@ -1,5 +1,34 @@
 # NDScan flow
 
+This file elucidates various flows of data within the ndscan framework.
+
+A generic Artiq experiment looks like:
+```
+from artiq.experiment import *     
+
+class SetLED(EnvExperiment):
+    
+    def build(self):
+        self.setattr_device("core")
+        self.setattr_device("led1")
+        self.setattr_argument("state", BooleanValue(True))
+
+    @kernel
+    def run(self):  
+        self.core.reset()
+        if self.state:                                     
+          self.led1.on() # Connected to L1 on front panel of Kasli SOC
+```
+An `EnvExperiment` is one which is both an `Experiment`, and `HasEnvironment`.
+An `Experiment` says you must create `prepare()`, `run()`, `analyse()` methods.
+`HasEnvironment` says you are in an Artiq context, and therefore have access to
+various concepts, e.g. (arguments, devices, datasets). One of the functions you
+must then implement is `build()`, which typically sets device driver handles as kernel
+invariants, and requests arguments.
+
+
+
+
 ## Runner selection + high-level scan-chunk loop (flowchart)
 ```mermaid
 flowchart TD
