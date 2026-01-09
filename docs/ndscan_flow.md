@@ -61,30 +61,31 @@ sequenceDiagram
   participant S as Scheduler
 
   Note over Host,Frag: Start of scan chunk
-  Host->>Frag: recompute_param_defaults()
-  Host->>Frag: host_setup()
+  Host->>Frag: recompute_param_defaults
+  Host->>Frag: host_setup
 
-  Note over Host,Core: Enter kernel acquire()
-  Host->>Core: KernelScanRunner.acquire()  (@kernel)
+  Note over Host,Core: Enter kernel acquire
+  Host->>Core: acquire (kernel)
 
   loop chunk loop
-    Core->>Host: _get_param_values_chunk() (RPC, ~10 points)
-    loop for each point in chunk (on core)
-      Core->>S: check_pause() (rate-limited ~0.2s)
+    Core->>Host: get_param_values_chunk (RPC)
+    loop each point in chunk (core)
+      Core->>S: check_pause (rate limited)
       alt pause requested
-        Note over Core: exit kernel before next point
-        break
+        Note over Core: Exit before next point
+      else continue
+        Core->>Frag: device_setup
+        Note over Core,Frag: device_setup runs on core if @kernel; otherwise it is a host RPC
+        Core->>Frag: run_once (kernel)
+        Core->>Host: point_completed (async RPC)
       end
-      Core->>Frag: device_setup()  (core if @kernel; otherwise host RPC)
-      Core->>Frag: run_once()      (@kernel)
-      Core->>Host: _point_completed() (async RPC pushes results + axis coords)
     end
   end
 
-  Core->>Frag: device_cleanup()  (in kernel finally)
+  Core->>Frag: device_cleanup (kernel)
   Note over Host,Frag: Back on host after kernel exits
-  Host->>Frag: host_cleanup()
-  Host->>S: pause() (if interrupted)
+  Host->>Frag: host_cleanup
+
 ```
 
 ## A tiny state diagram for “why did setup run again?”
