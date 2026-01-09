@@ -42,28 +42,28 @@ class LoadRbMOT(ExpFragment):
         self.setattr_param("quad_setpoint",
                            FloatParam,
                            "Quad coil servo setpoint voltage",
-                           8*V,
+                           8.8*V,
                            min=0*V, max=10*V
                            )
         
         self.setattr_param("NS_setpoint",
                     FloatParam,
                     "N/S Shims servo setpoint voltage",
-                    0*V,
+                    "dataset('calib.mot_ns_shims', 0.8*V)",
                     min=-10*V, max=+10*V
                     )
         
         self.setattr_param("EW_setpoint",
                     FloatParam,
                     "E/W Shims servo setpoint voltage",
-                        0*V,
+                    "dataset('calib.mot_ew_shims', -0.367*V)",
                     min=-10*V, max=+10*V
                     )
         
         self.setattr_param("UD_setpoint",
                     FloatParam,
                     "U/D Shims servo setpoint voltage",
-                    0*V,
+                     "dataset('calib.mot_ud_shims', -0.119*V)",
                     min=-10*V, max=+10*V
                     )
         
