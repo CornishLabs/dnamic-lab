@@ -1,6 +1,6 @@
 # NDScan flow
 
-
+## Runner selection + high-level scan-chunk loop (flowchart)
 ```mermaid
 flowchart TD
   A[Build fragment tree<br/>build_fragment + init_params] --> B{run_once is @kernel?}
@@ -18,4 +18,83 @@ flowchart TD
   G -- Yes --> Z[Done]
   G -- No (pause) --> P[scheduler.pause]
   P --> C
+```
+
+## HostScanRunner: per-point order + pause boundary (sequence)
+```mermaid
+sequenceDiagram
+  participant Host
+  participant Frag as Fragment
+  participant S as Scheduler
+
+  Note over Host,Frag: Start of scan chunk
+  Host->>Frag: recompute_param_defaults()
+  Host->>Frag: host_setup()
+
+  loop for each scan point
+    Host->>Frag: (set axis ParamStores)
+    Host->>Frag: device_setup()
+    Host->>Frag: run_once()  (host)
+    Host->>Frag: ensure_complete_and_push() + push axis coords
+    Host->>S: check_pause()
+    alt pause requested
+      Note over Host,Frag: Chunk ends after current point
+      Host->>Frag: device_cleanup()
+      Host->>Frag: host_cleanup()
+      Host->>S: pause()
+      Note over Host,Frag: On resume, start next chunk
+    end
+  end
+
+  Note over Host,Frag: Scan complete
+  Host->>Frag: device_cleanup()
+  Host->>Frag: host_cleanup()
+```
+
+## KernelScanRunner: chunking + pause polling (sequence)
+
+```mermaid
+sequenceDiagram
+  participant Host
+  participant Core
+  participant Frag as Fragment
+  participant S as Scheduler
+
+  Note over Host,Frag: Start of scan chunk
+  Host->>Frag: recompute_param_defaults()
+  Host->>Frag: host_setup()
+
+  Note over Host,Core: Enter kernel acquire()
+  Host->>Core: KernelScanRunner.acquire()  (@kernel)
+
+  loop chunk loop
+    Core->>Host: _get_param_values_chunk() (RPC, ~10 points)
+    loop for each point in chunk (on core)
+      Core->>S: check_pause() (rate-limited ~0.2s)
+      alt pause requested
+        Note over Core: exit kernel before next point
+        break
+      end
+      Core->>Frag: device_setup()  (core if @kernel; otherwise host RPC)
+      Core->>Frag: run_once()      (@kernel)
+      Core->>Host: _point_completed() (async RPC pushes results + axis coords)
+    end
+  end
+
+  Core->>Frag: device_cleanup()  (in kernel finally)
+  Note over Host,Frag: Back on host after kernel exits
+  Host->>Frag: host_cleanup()
+  Host->>S: pause() (if interrupted)
+```
+
+## A tiny state diagram for “why did setup run again?”
+
+```mermaid
+stateDiagram-v2
+  [*] --> ChunkSetup
+  ChunkSetup --> Running: host_setup done
+  Running --> ChunkCleanup: pause requested or scan complete
+  ChunkCleanup --> Paused: if pause requested
+  ChunkCleanup --> [*]: if scan complete
+  Paused --> ChunkSetup: resume
 ```
