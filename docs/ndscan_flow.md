@@ -7,6 +7,10 @@ A generic Artiq experiment looks like:
 from artiq.experiment import *     
 
 class SetLED(EnvExperiment):
+
+    def prepare(self):
+        # Precompute something 'intensive' on the timescale of exp
+        pass
     
     def build(self):
         self.setattr_device("core")
@@ -25,8 +29,8 @@ various concepts, e.g. (arguments, devices, datasets). One of the functions you
 must then implement is `build()`, which typically sets device driver handles as kernel
 invariants, and requests arguments.
 
-
-
+There are some problems with this regarding composability. It encourages a big god object sat inside run, and is hard to compose and maintain sequences.
+The `ndscan` library aims to solve this.
 
 ## Runner selection + high-level scan-chunk loop (flowchart)
 ```mermaid
