@@ -44,7 +44,7 @@ class ReadoutFluorescence(ExpFragment):
             rois = self.get_dataset("rois",archive=False)
         except KeyError:
             # sensible default
-            rois = [(15, 18, 5, 8), (15, 18, 11, 14), (15, 18, 17, 20), (15, 18, 23, 26), (15, 18, 29, 32), (15, 18, 35, 38), (15, 18, 41, 44), (15, 18, 47, 50)]
+            rois = [[(15, 18, 5, 8)], [(15, 18, 11, 14)], [(15, 18, 17, 20)], [(15, 18, 23, 26)], [(15, 18, 29, 32)], [(15, 18, 35, 38)], [(15, 18, 41, 44)], [(15, 18, 47, 50)]]
             self.set_dataset("rois", rois, broadcast=True)
 
         rois_shape = np.shape(rois)

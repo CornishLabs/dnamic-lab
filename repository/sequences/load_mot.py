@@ -1,4 +1,5 @@
 from ndscan.experiment import *
+from contextlib import suppress
 
 class LoadRbMOT(ExpFragment):
     def build_fragment(self):
@@ -7,87 +8,80 @@ class LoadRbMOT(ExpFragment):
                            FloatParam,
                            "Cool light AOM drive frequency",
                            110*MHz,
-                            min=(110-50)*MHz,max=(110+50)*MHz)
-        
+                           min=(110-50)*MHz, max=(110+50)*MHz)
+
         self.setattr_param("repump_frequency",
                            FloatParam,
                            "Repump light AOM drive frequency",
                            110*MHz,
-                           min=(110-50)*MHz,max=(110+50)*MHz)
-        
+                           min=(110-50)*MHz, max=(110+50)*MHz)
+
         self.setattr_param("cool_dds_amp",
-                            FloatParam,
-                            "Cool light AOM dds amp (0-1)",
-                            0.6,
-                            min=0,max=1)
-        
+                           FloatParam,
+                           "Cool light AOM DDS amp (0-1)",
+                           0.6,
+                           min=0, max=1)
+
         self.setattr_param("repump_dds_amp",
-                            FloatParam,
-                            "Repump light AOM dds amp (0-1)",
-                            0.6,
-                            min=0,max=1)
-        
+                           FloatParam,
+                           "Repump light AOM DDS amp (0-1)",
+                           0.6,
+                           min=0, max=1)
+
         self.setattr_param("cool_dds_att",
-                            FloatParam,
-                            "Cool light AOM dds attenuator 0.5db res",
-                            3.0*dB,
-                            min=0*dB,max=30*dB)
-        
+                           FloatParam,
+                           "Cool light AOM DDS attenuator",
+                           3.0*dB,
+                           min=0*dB, max=30*dB)
+
         self.setattr_param("repump_dds_att",
-                            FloatParam,
-                            "Repump light AOM dds amp 0.5db res",
-                            3.0*dB,
-                            min=0*dB,max=30*dB)
-        
+                           FloatParam,
+                           "Repump light AOM DDS attenuator",
+                           3.0*dB,
+                           min=0*dB, max=30*dB)
+
         self.setattr_param("quad_setpoint",
                            FloatParam,
                            "Quad coil servo setpoint voltage",
                            8.8*V,
-                           min=0*V, max=10*V
-                           )
-        
+                           min=0*V, max=10*V)
+
         self.setattr_param("NS_setpoint",
-                    FloatParam,
-                    "N/S Shims servo setpoint voltage",
-                    "dataset('calib.mot_ns_shims', 0.8*V)",
-                    min=-10*V, max=+10*V
-                    )
-        
+                           FloatParam,
+                           "N/S Shims servo setpoint voltage",
+                           "dataset('calib.mot_ns_shims', 0.8*V)",
+                           min=-10*V, max=+10*V)
+
         self.setattr_param("EW_setpoint",
-                    FloatParam,
-                    "E/W Shims servo setpoint voltage",
-                    "dataset('calib.mot_ew_shims', -0.367*V)",
-                    min=-10*V, max=+10*V
-                    )
-        
+                           FloatParam,
+                           "E/W Shims servo setpoint voltage",
+                           "dataset('calib.mot_ew_shims', -0.367*V)",
+                           min=-10*V, max=+10*V)
+
         self.setattr_param("UD_setpoint",
-                    FloatParam,
-                    "U/D Shims servo setpoint voltage",
-                     "dataset('calib.mot_ud_shims', -0.119*V)",
-                    min=-10*V, max=+10*V
-                    )
-        
+                           FloatParam,
+                           "U/D Shims servo setpoint voltage",
+                           "dataset('calib.mot_ud_shims', -0.119*V)",
+                           min=-10*V, max=+10*V)
+
         self.setattr_param("preload_time",
                            FloatParam,
                            "Time to load MOT before imaging starts",
                            3*s,
-                           min=1*ms, max=30*s
-                           )
-        
+                           min=1*ms, max=30*s)
+
         self.setattr_param("exposure_time",
                            FloatParam,
                            "Time spent fluorescing while exposing",
                            1*s,
-                           min=1*ms, max=30*s
-                           )
+                           min=1*ms, max=30*s)
 
         # Results
         self.setattr_result("mot_image", OpaqueChannel)
 
-        # Device drivers
+        # Devices
         self.setattr_device("core")
         self.setattr_device("andor_ctrl")
-        
         self.setattr_device("ttl_camera_exposure")
 
         self.setattr_device("dds_ch_rb_cool")
@@ -95,95 +89,96 @@ class LoadRbMOT(ExpFragment):
         self.setattr_device("dds_cpld_rb")
 
         self.setattr_device("zotino0")
-    
-    @kernel
-    def prepare_ddss(self):
 
-        delay(2*ms)
-        # Initialise CPLDs on Urukuls (DDS cards)
-        for cpld in [self.dds_cpld_rb]:
-            cpld.init()
-        
-        # Initialise DDS Channels on Urukuls
-        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
-            dds.init()
+    def host_setup(self):
+        super().host_setup()
+        self._configure_camera()
+        self._rt_init()
 
-        for dds, freq, amp, att in [
-            (self.dds_ch_rb_cool, self.cool_frequency.get(), self.cool_dds_amp.get(), self.cool_dds_att.get()),
-            (self.dds_ch_rb_repump, self.repump_frequency.get(), self.repump_dds_amp.get(), self.repump_dds_att.get()),
-            ]:
-            dds.sw.off()
-            dds.set(freq, amplitude=amp)
-            dds.set_att(att)
+    def _configure_camera(self):
+        ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
 
-    @rpc
-    def initialise_camera(self):
-        
-        ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (0-based inclusive)
-        
-        # Abort any previous acquisiton
-        try:
+        with suppress(Exception):
             self.andor_ctrl.abort_acquisition()
-        except:
-            pass
 
-        # 0=Full Auto, 1= Perm open 2=Perm closed, 5=Open for any series
-        self.andor_ctrl.set_shutter(mode=5) 
-
-        # Configure camera for a single image
-        self.andor_ctrl.set_trigger_mode(7) # 0=internal, 6 = External start, 7 = External exposure
+        self.andor_ctrl.set_shutter(mode=5)
+        self.andor_ctrl.set_trigger_mode(7)   # external exposure
         self.andor_ctrl.set_image_region(*ROI)
-        self.andor_ctrl.start_acquisition()
+
+    @kernel
+    def _rt_init(self):
+        self.core.reset()
+        self.core.break_realtime()
+
+        self.dds_cpld_rb.init()
+        self.dds_ch_rb_cool.init()
+        self.dds_ch_rb_repump.init()
+        self.zotino0.init()
+
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
+        self.zotino0.set_dac([0.0*V], [3])
+
+    @kernel
+    def device_setup(self):
+        self.device_setup_subfragments()
+        self.core.break_realtime()
+
+        if self.cool_frequency.changed_after_use() or self.cool_dds_amp.changed_after_use():
+            self.dds_ch_rb_cool.set(self.cool_frequency.use(),
+                                    amplitude=self.cool_dds_amp.use())
+        if self.cool_dds_att.changed_after_use():
+            self.dds_ch_rb_cool.set_att(self.cool_dds_att.use())
+
+        if self.repump_frequency.changed_after_use() or self.repump_dds_amp.changed_after_use():
+            self.dds_ch_rb_repump.set(self.repump_frequency.use(),
+                                      amplitude=self.repump_dds_amp.use())
+        if self.repump_dds_att.changed_after_use():
+            self.dds_ch_rb_repump.set_att(self.repump_dds_att.use())
+
+        self.zotino0.set_dac(
+            [self.NS_setpoint.use(), self.EW_setpoint.use(),
+             self.UD_setpoint.use(), self.quad_setpoint.use()],
+            [0, 1, 2, 3],
+        )
+
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
 
     @kernel
     def rt_actions(self):
-        self.core.break_realtime() 
-        # Initialise DDSs freq, amp, att
-        self.prepare_ddss()
+        self.core.break_realtime()
 
-        # Open shutters the calibrated amount of time beforehand (TODO)
-        
-        # Turn Quad+shims on
-        self.zotino0.set_dac(
-            [self.NS_setpoint.get(), self.EW_setpoint.get(), self.UD_setpoint.get(), self.quad_setpoint.get()],
-              [0,1,2,3]
-        )
+        self.dds_ch_rb_cool.sw.on()
+        self.dds_ch_rb_repump.sw.on()
 
-        # Turn RF switches on to turn AOMs on
-        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
-            dds.sw.on()
-
-        # Hold output on for desired preload time
         delay(self.preload_time.get())
-
-        # Pulse the exposure (adds to the timeline)
         self.ttl_camera_exposure.pulse(self.exposure_time.get())
 
-        # Turn RF off
-        for dds in [self.dds_ch_rb_cool, self.dds_ch_rb_repump]:
-            dds.sw.off()
-
-        # Turn Quad off (Leave shims so field null)
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
         self.zotino0.set_dac([0.0*V], [3])
 
-    def run_once(self):
-        self.core.reset()
+    @kernel
+    def device_cleanup(self):
+        self.core.break_realtime()
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
+        self.zotino0.set_dac([0.0*V], [3])
+        self.device_cleanup_subfragments()
 
-        # Initialise camera
-        self.initialise_camera()
-        self.core.break_realtime() # Move timeline cursor to after camera init + margin
+    def run_once(self):
+        self.andor_ctrl.start_acquisition()
 
         self.rt_actions()
 
-        # Wait for camera to get image
         self.andor_ctrl.wait()
         img = self.andor_ctrl.get_image16()
+        with suppress(Exception):
+            self.andor_ctrl.abort_acquisition()
 
-        self.andor_ctrl.abort_acquisition()
-
-        # Put image into dataset as opaque.
         self.mot_image.push(img)
-        self.set_dataset("andor.image", img, broadcast=True)    
+        self.set_dataset("andor.image", img, broadcast=True)
 
 
 MOTLoadExp = make_fragment_scan_exp(LoadRbMOT)

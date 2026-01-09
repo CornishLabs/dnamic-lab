@@ -5,7 +5,7 @@ class SetLED(EnvExperiment):
     def build(self):
         self.setattr_device("core")
         self.setattr_device("led1")
-        self.setattr_argument("state", BooleanValue(True))
+        self.setattr_argument("state", BooleanValue(False))
 
     @kernel
     def run(self):  
