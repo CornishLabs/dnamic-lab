@@ -1,6 +1,8 @@
 from device_db_generated import device_db as ddb_gen
 from aliases import aliases
 
+from dax.sim import enable_dax_sim as maybe_enable_dax_sim
+
 custom_controllers = {
     "andor_ctrl": {
         "type": "controller",
@@ -21,4 +23,5 @@ custom_controllers = {
     },
 }
 
-device_db = ddb_gen | aliases | custom_controllers
+# Configuration of sim is set in .dax
+device_db = maybe_enable_dax_sim(ddb_gen | aliases | custom_controllers)

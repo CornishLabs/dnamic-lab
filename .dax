@@ -1,0 +1,5 @@
+[dax.sim]
+; Enable DAX.sim (only required if not provided as a function parameter)
+enable = True
+disable = core_moninj core_analyzer
+

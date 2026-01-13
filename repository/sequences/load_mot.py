@@ -94,6 +94,7 @@ class LoadRbMOT(ExpFragment):
         super().host_setup()
         self._configure_camera()
         self._rt_init()
+        print(self.__dir__())
 
     def _configure_camera(self):
         ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)

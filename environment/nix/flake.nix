@@ -3,13 +3,15 @@
     extra-trusted-public-keys = "nixbld.m-labs.hk-1:5aSRVA5b320xbNvu30tqxVPXpld73bhtOeH6uAjRyHc=";
     extra-substituters = "https://nixbld.m-labs.hk";
   };
-  inputs.extrapkg.url = "git+https://git.m-labs.hk/M-Labs/artiq-extrapkg.git"; #?ref=release-8";
+  inputs.extrapkg.url = "git+https://git.m-labs.hk/M-Labs/artiq-extrapkg.git?ref=release-8";
+  # inputs.extrapkg.url = "git+https://git.m-labs.hk/M-Labs/artiq-extrapkg.git"; #?ref=release-8";
   outputs = { self, extrapkg }:
     let
       pkgs = extrapkg.pkgs;
       artiq = extrapkg.packages.x86_64-linux;
       python-env = pkgs.python3.withPackages(ps : [
             artiq.artiq
+            artiq.dax
             ps.pandas
             ps.matplotlib
       ]);
@@ -25,6 +27,7 @@
         buildInputs = [ 
           python-env
           artiq-lab-tmux
+          pkgs.gtkwave
         ];
       shellHook = ''
         if [ -z "$SCRATCH_DIR" ]; then
