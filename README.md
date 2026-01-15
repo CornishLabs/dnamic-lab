@@ -30,4 +30,8 @@ nix develop ./environment/nix
 
 # To start all the artiq processes
 artiq-lab-tmux
+
+
+# OR (doesn't start ndscan janitor)
+python -m artiq.frontend.artiq_session -m=-v -m=--git -m=--repository -m=. -m=--experiment-subdir -m=repository -c=-v -d=-p -d=ndscan.dashboard_plugin
 ```
