@@ -1,20 +1,31 @@
 # dnamic-lab
 Durham Neutral Atom and Molecule Improved Control. Primarily Artiq code for experimental control, and NDSPs.
 
-The wiki stores my questions, musings, and documentation for future people who go on this journey.
+The wiki/docs stores my questions, musings, and documentation for future people who go on this journey.
 
 ## How to use this repo
 
-Get to the point of having a `nix develop` shell setup with https://github.com/CornishLabs/dnamic-setup.
+Get to the point of having a `nix develop` shell setup.
 
-Then:
 ```bash
 cd ~/
+mkdir -p ~/artiq-files
+cd artiq-files
+mkdir install
 git clone https://github.com/CornishLabs/dnamic-lab
-cd dnamic-lab
 
-# This script is only setup on the nix develop shell defined in the dnamic-setup repo
+# Now we make the editable install repos
+cd install
+mkdir virtualenvs
+git clone https://github.com/tomhepz/ndscan
+git clone https://github.com/OxfordIonTrapGroup/oitg
+
+# Now we activate the nix develop environment.
+cd ~/artiq-files/dnamic-lab
+nix develop ./environment/nix
+# This will create a virtualenv
+# It will also add the `artiq-lab-tmux` command to your shell
+
+# To start all the artiq processes
 artiq-lab-tmux
 ```
-
-This will launch a tmux session that starts all the necessary artiq components.
