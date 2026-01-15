@@ -24,7 +24,9 @@ git clone https://github.com/OxfordIonTrapGroup/oitg
 cd ~/artiq-files/dnamic-lab
 nix develop ./environment/nix
 # This will create a virtualenv
-# It will also add the `artiq-lab-tmux` command to your shell
+# It will also add the `artiq-lab-tmux` command to your shell.
+# At this point, follow the instructions to install the above 
+#   Python packages to the environemtn as editable installs.
 
 # To start all the artiq processes
 artiq-lab-tmux
