@@ -32,6 +32,10 @@ invariants, and requests arguments.
 There are some problems with this regarding composability. It encourages a big god object sat inside run, and is hard to compose and maintain sequences.
 The `ndscan` library aims to solve this.
 
+
+> [!WARNING]  
+> The below mermaid diagrams were generated with generative AI, they may be incorrect.
+
 ## Runner selection + high-level scan-chunk loop (flowchart)
 ```mermaid
 flowchart TD
