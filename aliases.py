@@ -27,4 +27,6 @@ aliases = {
     "dds_ch_RB2": "urukul6_ch2",
     "dds_ch_RB4": "urukul6_ch3",
     "dds_cpld_rsc": "urukul6_cpld",
+    # Main table:
+    "ttl_quad": "ttl16"
 }
