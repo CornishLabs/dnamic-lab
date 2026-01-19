@@ -169,21 +169,21 @@ class SetShims(Fragment):
         self.setattr_param("NS_setpoint",
                            FloatParam,
                            "N/S Shims servo setpoint voltage",
-                           0.0*V,
+                           0.2*V,
                            min=-10*V, max=+10*V)
         self.NS_setpoint: FloatParamHandle
 
         self.setattr_param("EW_setpoint",
                            FloatParam,
                            "E/W Shims servo setpoint voltage",
-                           0.0*V,
+                           0.3*V,
                            min=-10*V, max=+10*V)
         self.EW_setpoint: FloatParamHandle
 
         self.setattr_param("UD_setpoint",
                            FloatParam,
                            "U/D Shims servo setpoint voltage",
-                           0.0*V,
+                           0.4*V,
                            min=-10*V, max=+10*V)
         self.UD_setpoint: FloatParamHandle
         
@@ -224,21 +224,21 @@ class ShimRamp(Fragment):
         self.setattr_param("NS_start_setpoint",
                            FloatParam,
                            "N/S Shims servo setpoint voltage at start of ramp",
-                           0.0*V,
+                           0.2*V,
                            min=-10*V, max=+10*V)
         self.NS_start_setpoint: FloatParamHandle
 
         self.setattr_param("NS_end_setpoint",
                            FloatParam,
                            "N/S Shims servo setpoint voltage at end of ramp",
-                           0.0*V,
+                           0.3*V,
                            min=-10*V, max=+10*V)
         self.NS_end_setpoint: FloatParamHandle
 
         self.setattr_param("EW_start_setpoint",
                            FloatParam,
                            "E/W Shims servo setpoint voltage at start of ramp",
-                           0.0*V,
+                           0.4*V,
                            min=-10*V, max=+10*V)
         self.EW_start_setpoint: FloatParamHandle
 
