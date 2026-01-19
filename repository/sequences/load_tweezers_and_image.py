@@ -388,7 +388,7 @@ class LoadRbMOTImage(ExpFragment):
         self.setattr_fragment("Rb_MOT_loader", LoadRbMOT)
         self.setattr_param("Rb_MOT_preload_time",
                            FloatParam,
-                           "How long to load the MOT for before starting exposing the camera"
+                           "How long to load the MOT for before starting exposing the camera",
                            1.0*s,
                            min=1.0*ms,max=10.0*s)
         self.Rb_MOT_preload_time:FloatParamHandle
