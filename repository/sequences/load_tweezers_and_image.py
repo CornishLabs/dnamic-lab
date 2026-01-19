@@ -448,15 +448,12 @@ class LoadRbMOTImage(ExpFragment):
 
 LoadRbMOTImageExp = make_fragment_scan_exp(LoadRbMOTImage)
 
-"""
+
 class CompressMOT(Fragment):
 
     def build_fragment(self):
         self.setattr_fragment("shim_ramp_after_MOT", ShimRamp)
-        self.setattr_parameter("compression_time",
-                               FloatParam,
-                               10*ms,
-                               min=0*ms,max=100*ms)
+
         
     def compress(self):
         self.shim_ramp_after_MOT.ramp_shims() # Shim it to where the tweezers are
@@ -503,7 +500,7 @@ class LoadMOTToTweezers(Fragment):
         self.Rb_MOT_compressor.compress() 
 
         # Turn the Quad coils off, set shims to zero field, for molasses/PGRC.
-        self.Rb_MOT_loader.MOT_quad.turn_off()
+        # self.Rb_MOT_loader.MOT_quad.turn_off()
         self.Rb_molasses_shims.set_shims()
         delay(Rb_molasses_time)
 
@@ -515,13 +512,42 @@ class LoadMOTToTweezersImage(ExpFragment):
 
     def build_fragment(self):
         self.setattr_fragment("load_mot_to_twe", LoadMOTToTweezers)
-        self.setattr_fragment("image_twe_after_mot", DualImageCool)
+        # self.setattr_fragment("image_twe_after_mot", DualImageCool)
+        self.setattr_device("ttl_camera_exposure")
+
+    def _configure_camera(self):
+        ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
+
+        with suppress(Exception):
+            self.andor_ctrl.abort_acquisition()
+
+        self.andor_ctrl.set_shutter(mode=5)
+        self.andor_ctrl.set_trigger_mode(7)   # external exposure
+        self.andor_ctrl.set_image_region(*ROI)
+
+    def host_setup(self):
+        super().host_setup()
+        self._configure_camera()
+
+    @kernel
+    def rtio_events(self):
+        self.load_mot_to_twe.load_mot_to_tweezers()
+        # self.image_twe_after_mot.image()
+        self.ttl_camera_exposure.pulse(self.exposure_time.get())
 
     def run_once(self):
-        self.load_mot_to_twe.load_mot_to_tweezers()
-        self.image_twe_after_mot.image()
+        self.andor_ctrl.start_acquisition()
+
+        self.rtio_events()
+        
+        self.andor_ctrl.wait()
+        img = self.andor_ctrl.get_image16()
+        with suppress(Exception):
+            self.andor_ctrl.abort_acquisition()
+
+        self.mot_image.push(img)
+        self.set_dataset("andor.image", img, broadcast=True)
 
 
 
-LoadMOTToTweezersImageArtiq = make_fragment_scan_exp(LoadMOTToTweezersImage)
-"""
+LoadMOTToTweezersImageExp = make_fragment_scan_exp(LoadMOTToTweezersImage)
