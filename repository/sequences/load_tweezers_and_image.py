@@ -1,4 +1,3 @@
-from ndscan.experiment import *
 from contextlib import suppress
 
 # core device drivers
@@ -7,9 +6,16 @@ from artiq.coredevice.ad9910 import AD9910 # This is per ch
 from artiq.coredevice.urukul import CPLD # This is the whole urukul controller
 from artiq.coredevice.ttl import TTLOut
 from artiq.coredevice.zotino import Zotino
-from artiq.coredevice.sampler import Sampler
 
-from ndscan.experiment.parameters import FloatParamHandle
+# ndscan concepts
+from ndscan.experiment.parameters import FloatParam, FloatParamHandle
+from ndscan.experiment import Fragment, ExpFragment, OpaqueChannel
+from ndscan.experiment import make_fragment_scan_exp
+
+# artiq
+from artiq.language.units import MHz, dB, s, ms, us, V
+from artiq.language.core import delay, kernel
+
 
 class Fluoresce(Fragment):
 
@@ -204,11 +210,6 @@ class SetShims(Fragment):
          # To continue to initialise all subfragments, invoke the parent implementation:
         super().host_setup()
 
-    
-    def device_setup(self): # Run at the start of each run_once()
-        # Do I need break_realtime here()? Does the caller not guarantuee this?
-        self.device_setup_subfragments() # The different function name here it so satisfy the compiler
-
     # -- In Seq action functions --
     @kernel
     def set_shims(self):
@@ -266,6 +267,7 @@ class ShimRamp(Fragment):
         self.setattr_param("ramp_time",
                            FloatParam,
                            "Ramp time, note the end value will be set at exactly ramp_time after (final dig step length jitter).",
+                           10*ms,
                            min=0*us, max=100*ms
                            )
         self.ramp_time: FloatParamHandle
@@ -273,6 +275,7 @@ class ShimRamp(Fragment):
         self.setattr_param("step_period",
                            FloatParam,
                            "How long each step of the ADC takes. 1/step_period is the update frequency.",
+                           100*us,
                            min=1*us, max=100*ms
                            )
         self.step_period: FloatParamHandle
@@ -454,7 +457,7 @@ class CompressMOT(Fragment):
     def build_fragment(self):
         self.setattr_fragment("shim_ramp_after_MOT", ShimRamp)
 
-        
+    @kernel
     def compress(self):
         self.shim_ramp_after_MOT.ramp_shims() # Shim it to where the tweezers are
 
@@ -484,19 +487,20 @@ class LoadMOTToTweezers(Fragment):
                            8*V,
                            min=0*V, max=10*V
                            )
+    
 
 
-    def turn_tweezers_on():
+    def turn_tweezers_on(self):
         #TODO
         pass
 
+    @kernel
     def load_mot_to_tweezers(self):
-        self.core.break_realtime()
         delay(20*ms) # Add some slack for shutters to open
         
         self.Rb_MOT_loader.load_mot_on() # Load a mot
         self.turn_tweezers_on()
-        delay(self.Rb_MOT_load_time.use())
+        delay(self.Rb_MOT_load_time.get())
 
         # Compress the MOT with increased Quad and temporal dark MOT
         # This step also shims the MOT to where the tweezers are.
@@ -505,7 +509,7 @@ class LoadMOTToTweezers(Fragment):
         # Turn the Quad coils off, set shims to zero field, for molasses/PGRC.
         # self.Rb_MOT_loader.MOT_quad.turn_off()
         self.Rb_molasses_shims.set_shims()
-        delay(Rb_molasses_time)
+        delay(self.Rb_molasses_time.get())
 
         self.Rb_MOT_loader.load_mot_off()
 
@@ -516,7 +520,14 @@ class LoadMOTToTweezersImage(ExpFragment):
     def build_fragment(self):
         self.setattr_fragment("load_mot_to_twe", LoadMOTToTweezers)
         # self.setattr_fragment("image_twe_after_mot", DualImageCool)
+        self.setattr_device("andor_ctrl")
         self.setattr_device("ttl_camera_exposure")
+        self.setattr_device("core")
+
+
+        self.setattr_result("tweezers_image", OpaqueChannel)
+
+        
 
     def _configure_camera(self):
         ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
@@ -534,9 +545,10 @@ class LoadMOTToTweezersImage(ExpFragment):
 
     @kernel
     def rtio_events(self):
+        self.core.break_realtime()
         self.load_mot_to_twe.load_mot_to_tweezers()
         # self.image_twe_after_mot.image()
-        self.ttl_camera_exposure.pulse(self.exposure_time.get())
+        self.ttl_camera_exposure.pulse(10*ms)
 
     def run_once(self):
         self.andor_ctrl.start_acquisition()
@@ -548,7 +560,7 @@ class LoadMOTToTweezersImage(ExpFragment):
         with suppress(Exception):
             self.andor_ctrl.abort_acquisition()
 
-        self.mot_image.push(img)
+        self.tweezers_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
 
 
