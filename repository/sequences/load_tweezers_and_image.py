@@ -468,16 +468,19 @@ class LoadMOTToTweezers(Fragment):
         
         self.setattr_param("Rb_MOT_load_time",
                     FloatParam,
+                    "How long to load the MOT for",
                     100*ms,
                     min=1*ms,max=10*s)
 
         self.setattr_param("Rb_molasses_time",
                     FloatParam,
+                    "How long to do molasses stage",
                     30*ms,
                     min=1*ms,max=10*s)
         
         self.setattr_param("tweezer_depth",
                            FloatParam,
+                           "How deep tweezer is throughout",
                            8*V,
                            min=0*V, max=10*V
                            )
