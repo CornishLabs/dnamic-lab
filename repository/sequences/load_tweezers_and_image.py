@@ -16,6 +16,38 @@ from ndscan.experiment import make_fragment_scan_exp
 from artiq.language.units import MHz, dB, s, ms, us, V
 from artiq.language.core import delay, kernel
 
+class InitialiseStamps(Fragment):
+
+    def build_fragment(self):
+        # --- Devices (edit names to match your device_db aliases) ---
+        self.setattr_device("core")
+        self.core: Core
+
+        # Urukul / DDS
+        self.setattr_device("dds_cpld_rb")
+        self.dds_cpld_rb: CPLD
+        self.setattr_device("dds_ch_rb_cool")
+        self.dds_ch_rb_cool: AD9910
+        self.setattr_device("dds_ch_rb_repump")
+        self.dds_ch_rb_repump: AD9910
+
+        # Magnetic (optional but common)
+        self.setattr_device("zotino0")
+        self.zotino0: Zotino
+
+    def host_setup(self): # Ran at the start of every chunk
+        self.rtio_init_once()
+        super().host_setup() # Do all my children
+
+    @kernel
+    def rtio_init_once(self):
+        self.core.break_realtime()
+        
+        self.dds_cpld_rb.init()
+        self.dds_ch_rb_cool.init()
+        self.dds_ch_rb_repump.init()
+        self.zotino0.init()
+
 
 class Fluoresce(Fragment):
 
@@ -88,32 +120,6 @@ class Fluoresce(Fragment):
         self.ttl_rb_cool_shut: TTLOut
         self.setattr_device("ttl_rb_repump_shut")
         self.ttl_rb_repump_shut: TTLOut
-    
-
-
-    @kernel
-    def rtio_init_once(self):
-        # If some host logic was just run, we need to make sure the timeline is valid
-        self.core.break_realtime()
-        # Initialise
-        self.dds_cpld_rb.init()
-        self.dds_ch_rb_cool.init()
-        self.dds_ch_rb_repump.init()
-
-
-    def host_setup(self): # Run once at the start of exp alongside all other host_setups, recursively.
-        self.rtio_init_once()
-         # To continue to initialise all subfragments, invoke the parent implementation:
-        super().host_setup()
-
-    @kernel
-    def device_setup(self): # Run at the start of each run_once(), only for things that are constand in seq
-
-        # Do I need break_realtime here()? Does the caller not guarantuee this?
-        self.dds_ch_rb_cool.sw.off()
-        self.dds_ch_rb_repump.sw.off()
-
-        self.device_setup_subfragments() # The different function name here it so satisfy the compiler
     
     # --- In seq action funcs ---
 
@@ -198,18 +204,6 @@ class SetShims(Fragment):
         self.setattr_device("zotino0")
         self.zotino0: Zotino
 
-    @kernel
-    def rtio_init_once(self):
-        # If some host logic was just run, we need to make sure the timeline is valid
-        self.core.break_realtime()
-        # Initialise
-        self.zotino0.init() # Make sure the Zotino exists. Don't bother nulling it, because we're about to set it.
-    
-    def host_setup(self): # Run once at the start of exp alongside all other host_setups, recursively.
-        self.rtio_init_once()
-         # To continue to initialise all subfragments, invoke the parent implementation:
-        super().host_setup()
-
     # -- In Seq action functions --
     @kernel
     def set_shims(self):
@@ -284,19 +278,6 @@ class ShimRamp(Fragment):
         self.core: Core
         self.setattr_device("zotino0")
         self.zotino0: Zotino
-    
-
-    @kernel
-    def rtio_init_once(self):
-        # If some host logic was just run, we need to make sure the timeline is valid
-        self.core.break_realtime()
-        # Initialise
-        self.zotino0.init() # Make sure the Zotino exists. Don't bother nulling it, because we're about to set it.
-    
-    def host_setup(self): # Run once at the start of exp alongside all other host_setups, recursively.
-        self.rtio_init_once()
-         # To continue to initialise all subfragments, invoke the parent implementation:
-        super().host_setup()
 
     @kernel
     def ramp_shims(self):
@@ -338,7 +319,6 @@ class ShimRamp(Fragment):
         if residual > 0*us:
             delay(residual)
         self.zotino0.set_dac([NS1, EW1, UD1], [0, 1, 2])
-
 
 
 class QuadUse(Fragment):
