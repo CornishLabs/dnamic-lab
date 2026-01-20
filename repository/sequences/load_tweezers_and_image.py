@@ -16,10 +16,9 @@ from ndscan.experiment import make_fragment_scan_exp
 from artiq.language.units import MHz, dB, s, ms, us, V
 from artiq.language.core import delay, kernel
 
-class InitialiseStamps(Fragment):
+class Initialiser(Fragment):
 
     def build_fragment(self):
-        # --- Devices (edit names to match your device_db aliases) ---
         self.setattr_device("core")
         self.core: Core
 
@@ -31,7 +30,7 @@ class InitialiseStamps(Fragment):
         self.setattr_device("dds_ch_rb_repump")
         self.dds_ch_rb_repump: AD9910
 
-        # Magnetic (optional but common)
+        # DAC
         self.setattr_device("zotino0")
         self.zotino0: Zotino
 
@@ -46,8 +45,13 @@ class InitialiseStamps(Fragment):
         self.dds_cpld_rb.init()
         self.dds_ch_rb_cool.init()
         self.dds_ch_rb_repump.init()
+        
         self.zotino0.init()
 
+    @kernel
+    def safe_off_all(self):
+        # TODO: Set all TTLs low
+        pass
 
 class Fluoresce(Fragment):
 
@@ -368,6 +372,9 @@ class LoadRbMOT(Fragment):
     
 class LoadRbMOTImage(ExpFragment):
     def build_fragment(self):
+        self.setattr_fragment("initialiser", Initialiser) # Just needs to exist here to run
+        self.initialiser: Initialiser
+
         self.setattr_fragment("Rb_MOT_loader", LoadRbMOT)
         self.setattr_param("Rb_MOT_preload_time",
                            FloatParam,
@@ -412,8 +419,8 @@ class LoadRbMOTImage(ExpFragment):
         self.andor_ctrl.set_image_region(*ROI)
 
     def host_setup(self):
-        super().host_setup()
         self._configure_camera()
+        super().host_setup()
     
     def run_once(self):
         self.andor_ctrl.start_acquisition()
@@ -427,7 +434,6 @@ class LoadRbMOTImage(ExpFragment):
 
         self.mot_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
-
 
 LoadRbMOTImageExp = make_fragment_scan_exp(LoadRbMOTImage)
 
