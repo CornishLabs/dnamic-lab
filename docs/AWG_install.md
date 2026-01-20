@@ -1,6 +1,6 @@
 # Notes on installing AWG drivers.
 
-First step is to install the linux kernel drivers. It is rare that the ones on the disk you were given will work, so you will need to build from source. This is as simple as emailing spectrum instruments, getting the kernel driver source, then running the script `make_spcm4_linux_kerneldrv.sh`.
+First step is to install the linux kernel drivers. It is rare that the ones on the disk you were given will work, so you will need to build from source. This is as simple as emailing spectrum instruments, getting the kernel driver source, then running the script `make_spcm4_linux_kerneldrv.sh`. Note that according to their docs, this only installs the kernel driver, not the library.
 
 However, on Ubuntu with secure boot, this has the issue of the kernel driver needing to be signed in order to be loaded.
 You will see an error like:
@@ -86,3 +86,52 @@ sudo modprobe spcm4   # or spcm
 ## Make it survive kernel updates
 
 Every time you install a new kernel, the module will be rebuilt/installed for that kernel and **must be signed again** (unless the vendor provides a DKMS package that automatically integrates signing). So keep `~/module-signing/MOK.priv` safe.
+
+# Testing it's working
+
+We can then check that the kernel driver is loaded by:
+```
+lab@control-pc:~$ cat /proc/spcm4_cards
+
+Spectrum spcm driver interface for M4i/M4x/M2p/M5i cards
+----------------------------------------------------------
+Driver version:          3.13 build 23699
+Driver major number:     10
+
+/dev/spcm0
+     Card type:       M4i.66xx-x8 / M4x.66xx-x4
+```
+
+# Adding software from spectrum repos
+
+```
+cd ~/
+wget http://spectrum-instrumentation.com/dl/repo-key.asc
+gpg --dearmor -o repo-key.gpg repo-key.asc
+sudo cp repo-key.gpg /etc/apt/spectrum-instrumentation.gpg
+# This will litter your home folder ~/ with some gpg files,
+# These can be deleted now.
+
+sudo touch /etc/apt/sources.list.d/spectrum-instrumentation.list
+sudo nano /etc/apt/sources.list.d/spectrum-instrumentation.list
+```
+
+add in the line
+```
+deb [signed-by=/etc/apt/spectrum-instrumentation.gpg] http://spectrum-instrumentation.com/dl/ ./
+```
+
+save and exit nano.
+
+```
+sudo apt update
+sudo apt install sbench6 spcmcontrol libspcm-linux
+```
+
+Available packages appear to be:
+```
+libspcm-linux
+sbench6
+spcddscontrol
+spcmcontrol
+```
