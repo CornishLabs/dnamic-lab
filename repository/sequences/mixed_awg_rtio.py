@@ -16,6 +16,10 @@ from ndscan.experiment import make_fragment_scan_exp
 from artiq.language.units import MHz, dB, s, ms, us, V
 from artiq.language.core import delay, kernel
 
+import numpy as np
+
+from awgsegmentfactory import AWGProgramBuilder
+
 class Initialiser(Fragment):
 
     def build_fragment(self):
@@ -435,7 +439,7 @@ class LoadRbMOTImage(ExpFragment):
         self.mot_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
 
-LoadRbMOTImageExp = make_fragment_scan_exp(LoadRbMOTImage)
+LoadRbMOTImageTEMPExp = make_fragment_scan_exp(LoadRbMOTImage)
 
 
 class CompressMOT(Fragment):
@@ -447,13 +451,80 @@ class CompressMOT(Fragment):
     def compress(self):
         self.shim_ramp_after_MOT.ramp_shims() # Shim it to where the tweezers are
 
+class AWGContributor:
+    def contribute_awg(self, builder):
+        return builder  # default: no contribution
+    
+class AWGOwner(Fragment):
+    def build_fragment(self):
+        self.setattr_device("spec_seq_awg0")
 
-class LoadMOTToTweezers(Fragment):
+    def compile_and_upload(self, builder):
+        ir = builder.build_resolved_ir(sample_rate_hz=625e6)
+        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
+        compiled = compile_sequence_program(q, gain=1.0, clip=0.9, full_scale=32767)
+        self.spec_seq_awg0.upload_compiled(compiled)
+        return compiled
+
+class AWGInitialiser(Fragment, AWGContributor):
+
+    def build_fragment(self):
+        self.setattr_device("core")
+        self.setattr_device("spec_seq_awg0") # This device API handles upload of seqs
+
+    def contribute_awg(self, builder):
+        return (
+            builder
+            .logical_channel("H")
+            .logical_channel("V")
+            .segment("sync", mode="wait_trig", snap_len_to_quantum=False)
+            .hold(
+                time=1e-9
+            )  # wait_trig defaults: wrap-snap freqs; snap_len_to_quantum=False keeps trigger latency minimal
+        )
+
+class SetLoadingTweezers(Fragment, AWGContributor):
+
+    def build_fragment(self):
+        self.setattr_device("core")
+        self.setattr_device("spec_seq_awg0") # It also has the ttl for the trigger
+    
+    def contribute_awg(self, builder):
+        return (
+            builder
+            .define(
+                "loading_H",
+                logical_channel="H",
+                freqs=np.linspace(92.0e6, 110.0e6, 12),
+                amps=[0.08] * 12,
+                phases="auto",
+            )
+            .define("loading_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
+            .segment("loading_tweezers_on", mode="wait_trig", phase_mode="optimise")
+            .tones("H")
+            .use_def("loading_H")
+            .tones("V")
+            .use_def("loading_V")
+            .hold(
+                time=40e-6
+            )
+        )
+
+    @kernel
+    def rtio_actions(self):
+        self.spec_seq_awg0.ttl.pulse() # Leave previous loop and start doing this
+        # this segment would also set the power of the laser amplitude servo
+
+
+class LoadMOTToTweezers(Fragment,AWGContributor):
 
     def build_fragment(self):
         self.setattr_fragment("Rb_MOT_loader", LoadRbMOT)
         self.setattr_fragment("Rb_MOT_compressor", CompressMOT)
         self.setattr_fragment("Rb_molasses_shims", SetShims)
+        self.setattr_fragment("Rb_molasses_shims", SetShims)
+        self.setattr_fragment("init_817_awg", AWGInitialiser)
+        self.setattr_fragment("turn_817_on", SetLoadingTweezers)
         
         self.setattr_param("Rb_MOT_load_time",
                     FloatParam,
@@ -474,18 +545,17 @@ class LoadMOTToTweezers(Fragment):
                            min=0*V, max=10*V
                            )
     
-
-
-    def turn_tweezers_on(self):
-        #TODO
-        pass
-
+    def contribute_awg(self, builder):
+        b1 = self.init_817_awg.contribute_awg(builder)
+        b2 = self.turn_817_on.contribute_awg(b1)
+        return b2
+    
     @kernel
     def load_mot_to_tweezers(self):
         delay(20*ms) # Add some slack for shutters to open
         
         self.Rb_MOT_loader.load_mot_on() # Load a mot
-        self.turn_tweezers_on()
+        self.turn_817_on.rtio_actions()
         delay(self.Rb_MOT_load_time.get())
 
         # Compress the MOT with increased Quad and temporal dark MOT
@@ -499,12 +569,12 @@ class LoadMOTToTweezers(Fragment):
 
         self.Rb_MOT_loader.load_mot_off()
 
-    
 
 class LoadMOTToTweezersImage(ExpFragment):
 
     def build_fragment(self):
         self.setattr_fragment("load_mot_to_twe", LoadMOTToTweezers)
+        self.setattr_fragment("awg_owner", AWGOwner)
         # self.setattr_fragment("image_twe_after_mot", DualImageCool)
         self.setattr_device("andor_ctrl")
         self.setattr_device("ttl_camera_exposure")
@@ -537,6 +607,10 @@ class LoadMOTToTweezersImage(ExpFragment):
         self.ttl_camera_exposure.pulse(10*ms)
 
     def run_once(self):
+        b = AWGProgramBuilder()
+        b = self.load_mot_to_twe.contribute_awg(b) 
+        self.awg_owner.compile_and_upload(b)
+    
         self.andor_ctrl.start_acquisition()
 
         self.rtio_events()
@@ -549,13 +623,6 @@ class LoadMOTToTweezersImage(ExpFragment):
         self.tweezers_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
 
-class AWGControl(Fragment):
-
-    def build_fragment(self):
-        self.setattr_device("core")
-        self.setattr_device("spec_seq_awg0") # This device API handles upload of seqs
 
 
-    
-
-LoadMOTToTweezersImageExp = make_fragment_scan_exp(LoadMOTToTweezersImage)
+LoadMOTToTweezersImageTEMPExp = make_fragment_scan_exp(LoadMOTToTweezersImage)
