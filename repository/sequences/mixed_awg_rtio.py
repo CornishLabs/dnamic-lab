@@ -18,7 +18,7 @@ from artiq.language.core import delay, kernel
 
 import numpy as np
 
-from awgsegmentfactory import AWGProgramBuilder
+from awgsegmentfactory import AWGProgramBuilder, quantize_resolved_ir
 from awgsegmentfactory.debug import format_ir
 
 class Initialiser(Fragment):
@@ -453,7 +453,7 @@ class CompressMOT(Fragment):
         self.shim_ramp_after_MOT.ramp_shims() # Shim it to where the tweezers are
 
 class AWGContributor:
-    def contribute_awg(self, builder):
+    def contribute_awg(self, builder: AWGProgramBuilder) -> None:
         return builder  # default: no contribution
     
 class AWGOwner(Fragment):
@@ -461,13 +461,13 @@ class AWGOwner(Fragment):
         self.setattr_device("spec_seq_awg0")
 
     def compile_and_upload(self, builder):
-        print("Got here!")
+        print("Sending following to the card:")
         print(format_ir(builder.build_intent_ir()))
-        # ir = builder.build_resolved_ir(sample_rate_hz=625e6)
-        # q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
-        # compiled = compile_sequence_program(q, gain=1.0, clip=0.9, full_scale=32767)
-        # self.spec_seq_awg0.upload_compiled(compiled)
-        # return compiled
+        ir = builder.build_resolved_ir(sample_rate_hz=625e6)
+        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
+        print("After resolution and quantisation:")
+        print(q)
+        
 
 class AWGInitialiser(Fragment, AWGContributor):
 
@@ -476,7 +476,7 @@ class AWGInitialiser(Fragment, AWGContributor):
         self.setattr_device("spec_seq_awg0") # This device API handles upload of seqs
 
     def contribute_awg(self, builder):
-        return (
+        (
             builder
             .logical_channel("H")
             .logical_channel("V")
@@ -551,9 +551,8 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
                            )
     
     def contribute_awg(self, builder):
-        b1 = self.init_817_awg.contribute_awg(builder)
-        b2 = self.turn_817_on.contribute_awg(b1)
-        return b2
+        self.init_817_awg.contribute_awg(builder)
+        self.turn_817_on.contribute_awg(builder)
     
     @kernel
     def load_mot_to_tweezers(self):
@@ -585,7 +584,6 @@ class LoadMOTToTweezersImage(ExpFragment):
         self.setattr_device("ttl_camera_exposure")
         self.setattr_device("core")
 
-
         self.setattr_result("tweezers_image", OpaqueChannel)
 
         
@@ -608,12 +606,15 @@ class LoadMOTToTweezersImage(ExpFragment):
     def rtio_events(self):
         self.core.break_realtime()
         self.load_mot_to_twe.load_mot_to_tweezers()
-        # self.image_twe_after_mot.image()
+        # self.image_twe_after_mot.load_mot_to_tweimage()
         self.ttl_camera_exposure.pulse(10*ms)
+
+    def contribute_awg(self, builder):
+        self.load_mot_to_twe.contribute_awg(builder) 
 
     def run_once(self):
         b = AWGProgramBuilder()
-        b = self.load_mot_to_twe.contribute_awg(b) 
+        self.contribute_awg(b) 
         self.awg_owner.compile_and_upload(b)
     
         self.andor_ctrl.start_acquisition()
