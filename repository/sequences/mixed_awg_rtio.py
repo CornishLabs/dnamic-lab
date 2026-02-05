@@ -19,6 +19,7 @@ from artiq.language.core import delay, kernel
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
+from awgsegmentfactory.debug import format_ir
 
 class Initialiser(Fragment):
 
@@ -460,11 +461,13 @@ class AWGOwner(Fragment):
         self.setattr_device("spec_seq_awg0")
 
     def compile_and_upload(self, builder):
-        ir = builder.build_resolved_ir(sample_rate_hz=625e6)
-        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
-        compiled = compile_sequence_program(q, gain=1.0, clip=0.9, full_scale=32767)
-        self.spec_seq_awg0.upload_compiled(compiled)
-        return compiled
+        print("Got here!")
+        print(format_ir(builder.build_intent_ir()))
+        # ir = builder.build_resolved_ir(sample_rate_hz=625e6)
+        # q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
+        # compiled = compile_sequence_program(q, gain=1.0, clip=0.9, full_scale=32767)
+        # self.spec_seq_awg0.upload_compiled(compiled)
+        # return compiled
 
 class AWGInitialiser(Fragment, AWGContributor):
 
@@ -512,16 +515,18 @@ class SetLoadingTweezers(Fragment, AWGContributor):
 
     @kernel
     def rtio_actions(self):
-        self.spec_seq_awg0.ttl.pulse() # Leave previous loop and start doing this
+        pass
+        # self.spec_seq_awg0.ttl.pulse() # Leave previous loop and start doing this
         # this segment would also set the power of the laser amplitude servo
 
 
 class LoadMOTToTweezers(Fragment,AWGContributor):
 
     def build_fragment(self):
+        self.setattr_device("core")
+
         self.setattr_fragment("Rb_MOT_loader", LoadRbMOT)
         self.setattr_fragment("Rb_MOT_compressor", CompressMOT)
-        self.setattr_fragment("Rb_molasses_shims", SetShims)
         self.setattr_fragment("Rb_molasses_shims", SetShims)
         self.setattr_fragment("init_817_awg", AWGInitialiser)
         self.setattr_fragment("turn_817_on", SetLoadingTweezers)
