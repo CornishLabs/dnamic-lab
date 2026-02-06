@@ -18,7 +18,7 @@ from artiq.language.core import delay, kernel
 
 import numpy as np
 
-from awgsegmentfactory import AWGProgramBuilder, quantize_resolved_ir
+from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.debug import format_ir
 
 class Initialiser(Fragment):
@@ -39,6 +39,11 @@ class Initialiser(Fragment):
         self.setattr_device("zotino0")
         self.zotino0: Zotino
 
+        ttl_keys = [f"ttl{i}" for i in range(48)]
+        self.ttl_devices = [self.get_device(k) for k in ttl_keys]
+        kernel_invariants = getattr(self, "kernel_invariants", set())
+        self.kernel_invariants = kernel_invariants | set(ttl_keys)
+
     def host_setup(self): # Ran at the start of every chunk
         self.rtio_init_once()
         super().host_setup() # Do all my children
@@ -46,17 +51,19 @@ class Initialiser(Fragment):
     @kernel
     def rtio_init_once(self):
         self.core.break_realtime()
-        
+
+        self.safe_off_all()
+
         self.dds_cpld_rb.init()
         self.dds_ch_rb_cool.init()
         self.dds_ch_rb_repump.init()
         
         self.zotino0.init()
 
+
     @kernel
     def safe_off_all(self):
-        # TODO: Set all TTLs low
-        pass
+        [ttl_d.off() for ttl_d in self.ttl_devices]
 
 class Fluoresce(Fragment):
 
@@ -351,6 +358,10 @@ class QuadUse(Fragment):
     def turn_on(self):
         self.zotino0.set_dac([self.quad_setpoint.use()], [3])
         self.ttl_quad.on()
+
+    @kernel
+    def change_setpoint(self):
+        self.zotino0.set_dac([self.quad_setpoint.use()], [3])
     
     @kernel
     def turn_off(self):
@@ -447,10 +458,29 @@ class CompressMOT(Fragment):
 
     def build_fragment(self):
         self.setattr_fragment("shim_ramp_after_MOT", ShimRamp)
+        self.setattr_fragment("quad_compression_set",QuadUse)
+        self.setattr_device("zotino0")
+        self.setattr_device("core")
 
     @kernel
     def compress(self):
         self.shim_ramp_after_MOT.ramp_shims() # Shim it to where the tweezers are
+        self.quad_compression_set.change_setpoint()
+
+class MolassesFields(Fragment):
+
+    def build_fragment(self):
+        self.setattr_fragment("molasses_shims", SetShims)
+        self.molasses_shims: SetShims
+        self.setattr_device("ttl_quad")
+        self.ttl_quad: TTLOut
+        self.setattr_device("core")
+
+    @kernel
+    def change_fields_to_null(self):
+        self.molasses_shims.set_shims()
+        self.ttl_quad.off()
+
 
 class AWGContributor:
     def contribute_awg(self, builder: AWGProgramBuilder) -> None:
@@ -458,22 +488,23 @@ class AWGContributor:
     
 class AWGOwner(Fragment):
     def build_fragment(self):
-        self.setattr_device("spec_seq_awg0")
+        self.setattr_device("AWGTest4Ch")
 
     def compile_and_upload(self, builder):
         print("Sending following to the card:")
-        print(format_ir(builder.build_intent_ir()))
-        ir = builder.build_resolved_ir(sample_rate_hz=625e6)
-        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H":0,"V":1})
-        print("After resolution and quantisation:")
-        print(q)
-        
+        intent_ir = builder.build_intent_ir()
+        print(format_ir(intent_ir))
+        intent_ir_dict = intent_ir.encode()
+        print("Sending to NDSP...")
+        self.AWGTest4Ch.plan_phase_compile_upload(intent_ir_dict)
+        print("AWG NDSP finished! :)")
+
 
 class AWGInitialiser(Fragment, AWGContributor):
 
     def build_fragment(self):
         self.setattr_device("core")
-        self.setattr_device("spec_seq_awg0") # This device API handles upload of seqs
+        self.setattr_device("AWGTest4Ch") # This device API handles upload of seqs
 
     def contribute_awg(self, builder):
         (
@@ -490,7 +521,7 @@ class SetLoadingTweezers(Fragment, AWGContributor):
 
     def build_fragment(self):
         self.setattr_device("core")
-        self.setattr_device("spec_seq_awg0") # It also has the ttl for the trigger
+        self.setattr_device("AWGTest4Ch") # It also has the ttl for the trigger
     
     def contribute_awg(self, builder):
         return (
@@ -516,7 +547,7 @@ class SetLoadingTweezers(Fragment, AWGContributor):
     @kernel
     def rtio_actions(self):
         pass
-        # self.spec_seq_awg0.ttl.pulse() # Leave previous loop and start doing this
+        # self.AWGTest4Ch.ttl.pulse() # Leave previous loop and start doing this
         # this segment would also set the power of the laser amplitude servo
 
 
@@ -527,9 +558,10 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
 
         self.setattr_fragment("Rb_MOT_loader", LoadRbMOT)
         self.setattr_fragment("Rb_MOT_compressor", CompressMOT)
-        self.setattr_fragment("Rb_molasses_shims", SetShims)
+        self.setattr_fragment("Rb_molasses_fields", MolassesFields)
+        self.Rb_molasses_fields: MolassesFields
         self.setattr_fragment("init_817_awg", AWGInitialiser)
-        self.setattr_fragment("turn_817_on", SetLoadingTweezers)
+        self.setattr_fragment("turn_817_arr_on", SetLoadingTweezers)
         
         self.setattr_param("Rb_MOT_load_time",
                     FloatParam,
@@ -549,17 +581,19 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
                            8*V,
                            min=0*V, max=10*V
                            )
+        # TODO: Bind the start of CompressMOT to the end of LoadRbMOT
     
     def contribute_awg(self, builder):
         self.init_817_awg.contribute_awg(builder)
-        self.turn_817_on.contribute_awg(builder)
+        self.turn_817_arr_on.contribute_awg(builder)
     
     @kernel
     def load_mot_to_tweezers(self):
         delay(20*ms) # Add some slack for shutters to open
         
-        self.Rb_MOT_loader.load_mot_on() # Load a mot
-        self.turn_817_on.rtio_actions()
+        # Start MOT load & Turn tweezers on
+        self.Rb_MOT_loader.load_mot_on() 
+        self.turn_817_arr_on.rtio_actions() # Turns servo on, and triggers into start AWG seg
         delay(self.Rb_MOT_load_time.get())
 
         # Compress the MOT with increased Quad and temporal dark MOT
@@ -567,16 +601,19 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
         self.Rb_MOT_compressor.compress() 
 
         # Turn the Quad coils off, set shims to zero field, for molasses/PGRC.
-        # self.Rb_MOT_loader.MOT_quad.turn_off()
-        self.Rb_molasses_shims.set_shims()
+        self.Rb_molasses_fields.change_fields_to_null()
         delay(self.Rb_molasses_time.get())
 
         self.Rb_MOT_loader.load_mot_off()
+        # At this point, there will be tweezers on, ideally with atoms in.
 
 
 class LoadMOTToTweezersImage(ExpFragment):
 
     def build_fragment(self):
+        self.setattr_fragment("initialiser", Initialiser) # Just needs to exist here to run
+        self.initialiser: Initialiser
+
         self.setattr_fragment("load_mot_to_twe", LoadMOTToTweezers)
         self.setattr_fragment("awg_owner", AWGOwner)
         # self.setattr_fragment("image_twe_after_mot", DualImageCool)
@@ -606,26 +643,30 @@ class LoadMOTToTweezersImage(ExpFragment):
     def rtio_events(self):
         self.core.break_realtime()
         self.load_mot_to_twe.load_mot_to_tweezers()
-        # self.image_twe_after_mot.load_mot_to_tweimage()
         self.ttl_camera_exposure.pulse(10*ms)
 
     def contribute_awg(self, builder):
         self.load_mot_to_twe.contribute_awg(builder) 
 
     def run_once(self):
+        # Program AWG
         b = AWGProgramBuilder()
         self.contribute_awg(b) 
         self.awg_owner.compile_and_upload(b)
-    
+
+        # Start Camera acquisition (This will open ths shutter)
         self.andor_ctrl.start_acquisition()
 
+        # Do RTIO stuff to make a MOT and take picture
         self.rtio_events()
-        
+
+        # Wait for camera SDK to give image back
         self.andor_ctrl.wait()
         img = self.andor_ctrl.get_image16()
         with suppress(Exception):
             self.andor_ctrl.abort_acquisition()
 
+        # Push image into dataset and HDF5
         self.tweezers_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
 

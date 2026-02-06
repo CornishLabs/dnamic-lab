@@ -4,6 +4,9 @@ from typing import Optional, Tuple
 import numpy as np
 import spcm
 
+from awgsegmentfactory import IntentIR
+from awgsegmentfactory.debug import format_ir
+
 class SpectrumAWGCompilerUploader:
 
     def __init__(self, serial_number: int, simulation: bool = False):
@@ -13,12 +16,12 @@ class SpectrumAWGCompilerUploader:
     def ping(self) -> bool:
         return True
     
-    def plan_phase_compile_upload(self):
-        # Attach calibration
-        # Phase plan
-        # Compile to samples
-        # Upload to card
-        pass
+    def plan_phase_compile_upload(self, intent_ir_dict):
+        intent_ir = IntentIR.decode(intent_ir_dict)
+        print("Recieved intent IR:")
+        print(format_ir(intent_ir))
+        print("TODO: implement the rest of the compilation pipeline")
+
 
     def print_card_info(self):
         with spcm.Card(serial_number=self.serial_number) as card:

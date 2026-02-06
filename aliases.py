@@ -10,7 +10,7 @@ aliases = {
     "ttl_rb_repump_shut": "ttl35",
     "ttl_rb_probe_shut": "ttl37",
     "ttl_op_shut": "ttl38",
-    "ttl_rb4_shut": "ttl38",
+    "ttl_rb4_shut": "ttl39",
     ## DDS
     "dds_ch_cs_cool": "urukul4_ch0",
     "dds_ch_cs_repump": "urukul4_ch1",

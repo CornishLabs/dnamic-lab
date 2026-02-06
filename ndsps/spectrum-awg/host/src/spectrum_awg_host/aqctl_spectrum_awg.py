@@ -17,7 +17,7 @@ def get_argparser():
     sca.verbosity_args(p)
 
     p.add_argument("--simulation", action="store_true")
-    p.add_argument("--serial-number", action="store_true")
+    p.add_argument("--serial-number", type=int, required=True)
 
     return p
 

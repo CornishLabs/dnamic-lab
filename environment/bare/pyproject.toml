@@ -6,6 +6,7 @@ dependencies = [
     "aiohttp>=3.13.3",
     "artiq-comtools",
     "dnamic-andor-host",
+    "spectrum-awg-host",
     "numpy>=2.4.0",
     "pybase64>=1.4.3",
     "sipyco",
@@ -18,3 +19,4 @@ package = false
 artiq-comtools = { git = "https://git.m-labs.hk/M-Labs/artiq-comtools.git" }
 sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
 dnamic-andor-host = { path = "../../ndsps/andor-camera/host" , editable = true}
+spectrum-awg-host = { path = "../../ndsps/spectrum-awg/host" , editable = true}

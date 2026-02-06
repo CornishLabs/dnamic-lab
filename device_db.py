@@ -26,7 +26,7 @@ custom_controllers = {
         "host": "::1",
         "port": 4015,
         "target_name": "awg",
-        "command": "aqctl_spectrum_awg --serial-number 14926 -v -p {port} --bind {bind}",
+        "command": "/home/lab/artiq-files/dnamic-lab/ndsps/spectrum-awg/host/run_aqctl_spectrum_awg --serial-number 14926 -vv -p {port} --bind {bind}",
     },
 }
 
