@@ -17,6 +17,7 @@ def get_argparser():
     sca.verbosity_args(p)
 
     p.add_argument("--simulation", action="store_true")
+    p.add_argument("--serial-number", action="store_true")
 
     return p
 
@@ -27,12 +28,10 @@ def main():
 
     logger.info("Starting AWG NDSP")
     
-    awg = SpectrumAWGCompilerUploader(simulation=args.simulation)
+    awg = SpectrumAWGCompilerUploader(args.serial_number, simulation=args.simulation)
     
-    # TODO: Try connection on startup
-    # with spcm.Card(serial_number=[your serial number here]) as card:
     try:
-        # Expose ONE target named "camera"
+        # Expose ONE target named "awg"
         simple_server_loop({"awg": awg}, sca.bind_address_from_args(args), args.port)
     except KeyboardInterrupt:
         pass

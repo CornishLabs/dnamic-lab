@@ -21,7 +21,14 @@ custom_controllers = {
             "core": "core",
         },
     },
+    "AWGTest4Ch": {
+        "type": "controller",
+        "host": "::1",
+        "port": 4015,
+        "target_name": "awg",
+        "command": "aqctl_spectrum_awg --serial-number 14926 -v -p {port} --bind {bind}",
+    },
 }
 
 # Configuration of sim is set in .dax
-device_db = maybe_enable_dax_sim(ddb_gen | aliases | custom_controllers)
+device_db = maybe_enable_dax_sim((ddb_gen | aliases | custom_controllers), enable=True)

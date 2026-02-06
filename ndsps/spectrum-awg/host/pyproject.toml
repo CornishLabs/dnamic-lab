@@ -2,13 +2,11 @@
 name = "spectrum-awg-host"
 version = "0.1.0"
 description = "Host-side controller for Spectrum AWG in segment mode programmed with an AWGSegment Factory"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
+  "awgsegmentfactory",
   "numpy",
   "sipyco",
-  "pyandorsdk2",
-  "matplotlib>=3.10.8",
-  "pyqt6>=6.10.1",
 ]
 
 [project.optional-dependencies]
@@ -18,10 +16,11 @@ tools = [
 ]
 
 [project.scripts]
-aqctl_andor_emccd = "dnamic_andor_host.aqctl_andor_emccd:main"
+aqctl_spectrum_awg = "spectrum_awg_host.aqctl_spectrum_awg:main"
 
 [tool.uv.sources]
 sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
+awgsegmentfactory = { path = "../../../../../code/AWGSegmentFactory", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.9.11,<0.10.0"]
