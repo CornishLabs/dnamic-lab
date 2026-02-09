@@ -18,6 +18,9 @@ def get_argparser():
 
     p.add_argument("--simulation", action="store_true")
     p.add_argument("--serial-number", type=int, required=True)
+    p.add_argument("--num-active-ch", type=int, default=1)
+    p.add_argument("--sample-rate-hz", default="max")
+    p.add_argument("--card-max-mv", default=400)
 
     return p
 
@@ -26,7 +29,7 @@ def main():
     args = get_argparser().parse_args()
     sca.init_logger_from_args(args)
 
-    logger.info("Starting AWG NDSP")
+    logger.info(f"Starting AWG NDSP for SN {args.serial_number}")
     
     awg = SpectrumAWGCompilerUploader(args.serial_number, simulation=args.simulation)
     
@@ -36,7 +39,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        logger.info("Ending AWG NDSP")
+        logger.info(f"Ending AWG NDSP for SN {args.serial_number}")
 
 
 if __name__ == "__main__":
