@@ -1,20 +1,28 @@
 import threading
 from typing import Optional, Tuple
 
+import logging
+
 import numpy as np
+
 import spcm
+from spcm import units
 
 from awgsegmentfactory import (
-    AWGProgramBuilder,
-    ResolvedIR,
-    compile_sequence_program,
+    QIRtoSamplesSegmentCompiler,
     format_samples_time,
     quantize_resolved_ir,
-    resolve_intent_ir
+    resolve_intent_ir,
+    upload_sequence_program
 )
 
 from awgsegmentfactory import IntentIR
 from awgsegmentfactory.debug import format_ir
+
+from .calibration_constants import lut
+
+logger = logging.getLogger(__name__)
+
 
 def _print_quantization_report(compiled) -> None:
     fs = float(compiled.sample_rate_hz)
@@ -30,136 +38,190 @@ def _print_quantization_report(compiled) -> None:
             f"- {qi.name}: {o} -> {n} | mode={qi.mode} loop={qi.loop} loopable={qi.loopable}"
         )
 
-
-def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
-    segments_hw = []
-    for seg in compiled.segments:
-        s = sequence.add_segment(seg.n_samples)
-        s[:, :] = seg.data_i16
-        segments_hw.append(s)
-
-    steps_hw = []
-    for step in compiled.steps:
-        steps_hw.append(
-            sequence.add_step(segments_hw[step.segment_index], loops=step.loops)
-        )
-
-    sequence.entry_step(steps_hw[0])
-
-    for step in compiled.steps:
-        steps_hw[step.step_index].set_transition(
-            steps_hw[step.next_step], on_trig=step.on_trig
-        )
-
-    sequence.write_setup()
+def _channel_mask(n_ch: int) -> int:
+    mask = 0
+    for i in range(n_ch):
+        mask |= int(getattr(spcm, f"CHANNEL{i}"))
+    return mask
 
 
 class SpectrumAWGCompilerUploader:
+    """
+    This device manages a connection with the spectrum instruments card, and 
+    can compile quantised_ir to int16 samples for the card, and then upload them
+    to the card.
 
-    def __init__(self, serial_number: int, simulation: bool = False):
+    This class is not intrinsically thread-safe; the SiPyCo RPC server
+    (see sipyco.pc_rpc.simple_server_loop, sipyco.pc_rpc.Server)
+    provides serialisation of calls when `allow_parallel=False` which is the default.
+    
+    The onus is on the user to ensure a call order that is reasonable.
+    """
+
+    def __init__(self, 
+                 serial_number: int,
+                 sample_rate_hz, 
+                 card_max_mv: int, 
+                 physical_setup_info_str: str, 
+                 simulation: bool = False):
+        
+        # Card identification
         self.serial_number = int(serial_number)
+
+        # Card settings
+        self.sample_rate_hz = sample_rate_hz
+        self.card_max_mv = card_max_mv
+
+        # Info on what the card is connected to and how
+        try:
+            self.physical_setup = lut[physical_setup_info_str]
+        except KeyError as exc:
+            valid = ", ".join(sorted(lut))
+            raise ValueError(
+                f"Unknown physical setup {physical_setup_info_str!r}. "
+                f"Valid options: {valid}"
+            ) from exc
+
+        # Don't touch hardware, just produce debug plots
         self.simulation = bool(simulation)
+
+        # Owned card connection details
+        self._card_cm = None   # holds spcm.Card(...) context manager
+        self._card = None      # holds the active/entered card handle
+
+        # Caching/managing/storage of current sequence
+        self._card_configured = False # Whether or not the outputs are setup as expected
+        self.current_seq_hash = None # This will tell us whether or not we need to recompile & upload
+        self._upload_session = None # Needed for hotswap
+
+    def _setup_card_once(self, card):
+        if self._card_configured:
+            return
+
+        card.card_mode(spcm.SPC_REP_STD_SEQUENCE)
+
+        n_ch = self.physical_setup.N_ch
+        channels = spcm.Channels(card, card_enable=_channel_mask(n_ch))
+        channels.enable(True)
+        channels.output_load(50 * units.ohm)
+        channels.amp(self.card_max_mv * units.mV)
+        channels.stop_level(spcm.SPCM_STOPLVL_HOLDLAST)
+
+        trigger = spcm.Trigger(card)
+        trigger.or_mask(spcm.SPC_TMASK_EXT0)
+        trigger.ext0_mode(spcm.SPC_TM_POS)
+        trigger.ext0_level0(0.8 * units.V)
+        trigger.ext0_coupling(spcm.COUPLING_DC)
+        trigger.termination(1)
+        trigger.delay(0)
+
+        clock = spcm.Clock(card)
+        clock.mode(spcm.SPC_CM_INTPLL)
+        clock.sample_rate(self.sample_rate_hz * units.Hz)
+        clock.clock_output(False)
+
+        self._card_configured = True
+
+    def get_card(self):
+        """
+        Returns a comms handle to the card, uses existing connection if exists,
+        otherwise it creates one.
+        """
+        if self._card is not None:
+            return self._card
+
+        self._card_cm = spcm.Card(
+            serial_number=self.serial_number,
+            card_type=spcm.SPCM_TYPE_AO,
+        )
+        self._card = self._card_cm.__enter__()
+
+        # Optional: do one-time configuration here (mode, channels, trigger, clock, etc.)
+        return self._card
+
+    def close_card(self):
+        """
+        Closes the connection to a card, if we have one. This will also stop the card.
+        """
+        if self._card_cm is None:
+            return
+        # Ensure hardware is left in a sane state if you want:
+        try:
+            self._card.stop(spcm.M2CMD_DATA_STOPDMA)
+        finally:
+            self._card_cm.__exit__(None, None, None)
+            self._card_cm = None
+            self._card = None
+            self._card_configured = False
+            self.current_seq_hash = None
+            self._upload_session = None
         
     def ping(self) -> bool:
         return True
     
     def plan_phase_compile_upload(self, intent_ir_dict):
         intent_ir = IntentIR.decode(intent_ir_dict)
-        print("Recieved intent IR:")
-        print(format_ir(intent_ir))
-        print("TODO: implement the rest of the compilation pipeline")
+        logger.info(f"Received intent IR:\n{format_ir(intent_ir)}")
 
-        ####
+        new_hash = intent_ir.digest()
 
-        # TODO: Make these command line params in the ctl command line param
-        sample_rate_hz = 625e6
-        logical_channel_to_hardware_channel = {"H": 0, "V": 1}
-
-        ir = resolve_intent_ir(intent_ir, sample_rate_hz=sample_rate_hz)
-        q = quantize_resolved_ir(
-            ir, logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-            segment_quantum_s=4e-6
-        )
-
-        # If you don't have a card connected, use a safe "typical" int16 full-scale.
-        full_scale_default = (2**15)-1 #=32767
-        compiled = compile_sequence_program(
-            q,
-            gain=1.0,
-            clip=1.0,
-            full_scale=full_scale_default,
-        )
-
-        print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
-        _print_quantization_report(compiled)
-
-        # Optional: upload to a Spectrum card (requires Spectrum driver + spcm Python package).
-        try:
-            import spcm
-            from spcm import units
-        except Exception as exc:
-            print(f"spcm not available (skipping upload): {exc}")
+        if new_hash == self.current_seq_hash:
+            logger.info("Intent IR unchanged; skipping compile/upload.")
             return
 
-        try:
-            with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:
-                card.card_mode(spcm.SPC_REP_STD_SEQUENCE)
+        ir = resolve_intent_ir(intent_ir, sample_rate_hz=self.sample_rate_hz)
+        q = quantize_resolved_ir(ir, segment_quantum_s=40e-6)
 
-                # Configure enabled channels (H->CH0, V->CH1)
-                channels = spcm.Channels(card, card_enable=spcm.CHANNEL0 | spcm.CHANNEL1)
-                channels.enable(True)
-                channels.output_load(50*units.ohm)
-                channels.amp(450 * units.mV)
-                channels.stop_level(spcm.SPCM_STOPLVL_HOLDLAST)
 
-                # Triggers: EXT0 ends wait_trig steps.
-                trigger = spcm.Trigger(card)
-                trigger.or_mask(spcm.SPC_TMASK_EXT0)
-                trigger.ext0_mode(spcm.SPC_TM_POS)
-                trigger.ext0_level0(0.5 * units.V)
-                trigger.ext0_coupling(spcm.COUPLING_DC)
-                trigger.termination(1)
-                trigger.delay(0)
-
-                # Sample clock
-                clock = spcm.Clock(card)
-                clock.mode(spcm.SPC_CM_INTPLL)
-                clock.sample_rate(compiled.sample_rate_hz * units.Hz)
-                clock.clock_output(False)
-
-                # Compile again with the card's exact DAC scaling.
-                full_scale = int(card.max_sample_value()) - 1
-                compiled = compile_sequence_program(
-                    q,
-                    gain=1.0,
-                    clip=0.1,
-                    full_scale=full_scale,
-                )
-
-                sequence = spcm.Sequence(card)
-                _setup_spcm_sequence_from_compiled(sequence, compiled)
-                print("sequence written; starting card (Ctrl+C to stop)")
-
-                card.timeout(0)
-                card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
-                try:
-                    while True:
-                        time.sleep(0.2)
-                except KeyboardInterrupt:
-                    pass
-                finally:
-                    card.stop()
-        except spcm.SpcmException as exc:
-            print(f"Could not open Spectrum card (skipping upload): {exc}")
+        if self.simulation:
+            # Compute samples, but don't send to card.
+            slots = QIRtoSamplesSegmentCompiler(
+                quantised=q,
+                physical_setup=self.physical_setup,
+                full_scale_mv=self.card_max_mv,
+                full_scale=(2**15 - 1),
+            )
+            slots.compile_to_card_int16()
+            self.current_seq_hash = new_hash
+            # TODO: make debug plot appear
             return
 
+        card = self.get_card()
 
+        # Stop whatever is currently playing
+        card.stop(spcm.M2CMD_DATA_STOPDMA)
+        
+        self._setup_card_once(card)
+        
+        # Compile again with the card's exact DAC scaling.
+        full_scale = int(card.max_sample_value()) - 1
+        slots_compiler = QIRtoSamplesSegmentCompiler(
+            quantised=q,
+            physical_setup=self.physical_setup,
+            full_scale_mv=self.card_max_mv,
+            full_scale=full_scale,
+        )
+        slots_compiler.compile_to_card_int16()
+
+        try:
+            self._upload_session = upload_sequence_program(slots_compiler, mode="cpu", card=card)  # keep, don’t reuse yet
+            logger.info("Upload to AWG successful, starting")
+            card.timeout(0)
+            card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
+        except Exception:
+            self._upload_session = None
+            self.current_seq_hash = None
+            self._card_configured = False
+            try:
+                card.stop(spcm.M2CMD_DATA_STOPDMA)
+            except Exception:
+                pass
+            raise
+        else:
+            self.current_seq_hash = new_hash
 
     def print_card_info(self):
-        with spcm.Card(serial_number=self.serial_number) as card:
-            product_name = card.product_name()
-            status = card.status()
-            print(f"Product: {product_name}, card status: {status}")
-
-
-
+        card = self.get_card()
+        product_name = card.product_name()
+        status = card.status()
+        print(f"Product: {product_name}, card status: {status}")

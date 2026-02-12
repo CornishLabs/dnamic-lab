@@ -16,11 +16,11 @@ def get_argparser():
     sca.simple_network_args(p, 4015) #TODO: Check port
     sca.verbosity_args(p)
 
-    p.add_argument("--simulation", action="store_true")
     p.add_argument("--serial-number", type=int, required=True)
-    p.add_argument("--num-active-ch", type=int, default=1)
-    p.add_argument("--sample-rate-hz", default="max")
-    p.add_argument("--card-max-mv", default=400)
+    p.add_argument("--sample-rate-hz", type=int, required=True)
+    p.add_argument("--card-max-mv", type=int, default=282)
+    p.add_argument("--characterisation-lookup-str", type=str, required=True)
+    p.add_argument("--simulation", action="store_true")
 
     return p
 
@@ -31,16 +31,28 @@ def main():
 
     logger.info(f"Starting AWG NDSP for SN {args.serial_number}")
     
-    awg = SpectrumAWGCompilerUploader(args.serial_number, simulation=args.simulation)
+    awg = SpectrumAWGCompilerUploader(
+        serial_number=args.serial_number,
+        sample_rate_hz=args.sample_rate_hz,
+        card_max_mv=args.card_max_mv,
+        physical_setup_info_str=args.characterisation_lookup_str,
+        simulation=args.simulation,
+    )
     
     try:
         # Expose ONE target named "awg"
-        simple_server_loop({"awg": awg}, sca.bind_address_from_args(args), args.port)
+        simple_server_loop(
+            {"awg": awg},
+            sca.bind_address_from_args(args),
+            args.port,
+            description="Spectrum AWG NDSP",
+            allow_parallel=False
+        )
     except KeyboardInterrupt:
         pass
     finally:
         logger.info(f"Ending AWG NDSP for SN {args.serial_number}")
-
+        awg.close_card()
 
 if __name__ == "__main__":
     sys.exit(main())
