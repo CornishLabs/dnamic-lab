@@ -21,6 +21,7 @@ def get_argparser():
     p.add_argument("--card-max-mv", type=int, default=282)
     p.add_argument("--characterisation-lookup-str", type=str, required=True)
     p.add_argument("--simulation", action="store_true")
+    p.add_argument("--gpu", action="store_true")
 
     return p
 
@@ -37,6 +38,7 @@ def main():
         card_max_mv=args.card_max_mv,
         physical_setup_info_str=args.characterisation_lookup_str,
         simulation=args.simulation,
+        gpu_synth=args.gpu
     )
     
     try:

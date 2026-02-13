@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Host-side controller for Spectrum AWG in segment mode programmed with an AWGSegment Factory"
 requires-python = ">=3.13"
 dependencies = [
-  "awgsegmentfactory",
+  "awgsegmentfactory[cuda,control-hardware]",
   "numpy",
   "sipyco",
 ]

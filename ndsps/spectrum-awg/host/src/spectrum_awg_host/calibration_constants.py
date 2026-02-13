@@ -2,6 +2,18 @@ from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 
 lut: dict[str, AWGPhysicalSetupInfo] = {}
 
+AWG_1CH_MV = AWGPhysicalSetupInfo(
+    logical_to_hardware_map={'H': 0}
+)
+
+lut["AWG_1CH_MV"] = AWG_1CH_MV
+
+AWG_2CH_MV = AWGPhysicalSetupInfo(
+    logical_to_hardware_map={'H': 0, 'V': 1}
+)
+
+lut["AWG_2CH_MV"] = AWG_2CH_MV
+
 """
 uv run python -m awgsegmentfactory.tools.fit_optical_power_calibration \
 --input-data-file ./examples/calibrations/814_H_calFile_17.02.2022_0\=0.txt \
