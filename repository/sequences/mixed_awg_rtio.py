@@ -51,7 +51,7 @@ class InitialiseHardware(Fragment):
 
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {
-            "urukul_cplds", "ad9910s", "suservos", "zotinos", "samplers", "ttls"
+            "urukul_cplds", "ad9910s", "suservos", "suservo_channels", "zotinos", "samplers", "ttls"
         }
 
     def host_setup(self):
@@ -707,10 +707,17 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
         
         
         # Bind the start of CompressMOT to the end of LoadRbMOT
+        # And the end of compressMOT to the start of MollassesFields
         for dir in ['NS', 'EW', 'UD']:
             handle = self.setattr_param_like(f"loading_{dir}_setpoint", self.Rb_MOT_loader.MOT_set_shims, f"{dir}_setpoint")
             self.Rb_MOT_loader.MOT_set_shims.bind_param(f"{dir}_setpoint", handle)
             self.Rb_MOT_compressor.shim_ramp_after_MOT.bind_param(f"{dir}_start_setpoint", handle)
+
+            handle = self.setattr_param_like(f"molasses_{dir}_setpoint", self.Rb_molasses_fields.molasses_shims, f"{dir}_setpoint")
+            self.Rb_molasses_fields.molasses_shims.bind_param(f"{dir}_setpoint", handle)
+            self.Rb_MOT_compressor.shim_ramp_after_MOT.bind_param(f"{dir}_end_setpoint", handle)
+
+            
 
     
     def contribute_awg(self, builder):
@@ -803,6 +810,9 @@ class LoadMOTToTweezersImage(ExpFragment):
         self.load_mot_to_twe.contribute_awg(builder) 
 
     def run_once(self):
+
+        self.initialiser.safe_off_initial_state()
+        
         # Program AWG
         b = AWGProgramBuilder()
         self.contribute_awg(b) 

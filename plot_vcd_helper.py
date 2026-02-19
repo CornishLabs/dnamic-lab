@@ -1,13 +1,18 @@
 import re
+from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.colors import ListedColormap, BoundaryNorm
+import numpy as np
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from vcdvcd import VCDVCD
 
-from vcdvcd import VCDVCD  # pip install vcdvcd
+try:
+    from aliases import aliases as _ALIASES
+except ImportError:
+    _ALIASES: Dict[str, str] = {}
 
 
 # ----------------------------
@@ -22,9 +27,10 @@ _TIMESCALE_UNITS = {
     "fs": 1e-15,
 }
 
+
 def parse_timescale_seconds(vcd_path: str) -> Tuple[float, str]:
     """
-    Parse `$timescale <N><unit> $end` from the VCD header.
+    Parse `$timescale <N><unit> $end` from a VCD header.
     Returns: (seconds_per_tick, label_str)
     """
     header = []
@@ -35,10 +41,8 @@ def parse_timescale_seconds(vcd_path: str) -> Tuple[float, str]:
                 break
     txt = "".join(header)
 
-    # handle both single-line and multi-line timescale declarations
     m = re.search(r"\$timescale\s+(\d+)\s*([a-zA-Z]+)\s*\$end", txt, flags=re.S)
     if not m:
-        # if missing, fall back to "ticks" (still works if you treat x-axis as ticks)
         return 1.0, "ticks"
 
     n = int(m.group(1))
@@ -50,36 +54,78 @@ def parse_timescale_seconds(vcd_path: str) -> Tuple[float, str]:
 
 
 # ----------------------------
+# Name alias helpers
+# ----------------------------
+def build_reverse_alias_map(alias_map: Mapping[str, str]) -> Dict[str, str]:
+    """
+    Convert friendly->hardware aliases into hardware->friendly.
+    If multiple friendly names map to the same hardware name, keep the first.
+    """
+    reverse: Dict[str, str] = {}
+    for friendly_name, hardware_name in alias_map.items():
+        reverse.setdefault(hardware_name, friendly_name)
+    return reverse
+
+
+def format_signal_name(raw_name: str, alias_map: Optional[Mapping[str, str]] = None) -> str:
+    """
+    Rewrite dotted VCD signal names with friendly aliases where possible.
+    Example: ttl16.state -> ttl_quad.state
+    """
+    if not alias_map:
+        return raw_name
+
+    return ".".join(alias_map.get(part, part) for part in raw_name.split("."))
+
+
+def build_display_name_map(
+    names: List[str], alias_map: Optional[Mapping[str, str]] = None
+) -> Dict[str, str]:
+    """
+    Build raw->display labels, de-duplicating collisions by appending raw names.
+    """
+    mapped = [(name, format_signal_name(name, alias_map)) for name in names]
+    counts = Counter(display for _, display in mapped)
+    return {
+        raw: (f"{display} ({raw})" if counts[display] > 1 else display)
+        for raw, display in mapped
+    }
+
+
+def display_name(name: str, display_map: Optional[Mapping[str, str]] = None) -> str:
+    if not display_map:
+        return name
+    return display_map.get(name, name)
+
+
+# ----------------------------
 # Value parsing / classification
 # ----------------------------
 def _is_scalar_digital_value(v: str) -> bool:
-    v = v.strip()
-    return v in ("0", "1", "x", "X", "z", "Z")
+    return v.strip() in ("0", "1", "x", "X", "z", "Z")
+
 
 def vcd_value_to_float(v: str) -> float:
     """
     Best-effort conversion of a VCD value string to a float.
     - scalar: '0'/'1' -> 0/1
     - vector bitstrings: '10' -> 2 (binary), if only 0/1
-    - real: raw VCD uses r<real> (e.g. r1.23). Some parsers may strip 'r'.
+    - real: raw VCD uses r<real> (e.g. r1.23)
     - x/z -> NaN
     """
     s = v.strip()
     if s == "":
         return np.nan
 
-    # raw VCD real values are denoted by 'r' or 'R' prefix in the dump format :contentReference[oaicite:1]{index=1}
     if s[0] in ("r", "R"):
         s = s[1:].strip()
 
     if s in ("x", "X", "z", "Z"):
         return np.nan
 
-    # if it's a pure bitstring (vector) like '10', treat as binary
     if len(s) > 1 and all(c in "01" for c in s):
         return float(int(s, 2))
 
-    # plain numeric
     try:
         return float(s)
     except ValueError:
@@ -89,42 +135,46 @@ def vcd_value_to_float(v: str) -> float:
 @dataclass(frozen=True)
 class SignalTV:
     name: str
-    t_sec: np.ndarray     # change times in seconds
-    v_raw: List[str]      # raw value strings (same length as t_sec)
+    t_sec: np.ndarray
+    v_raw: List[str]
 
 
 def load_vcd_signals(
     vcd_path: str,
     *,
-    include: Optional[List[str]] = None,   # regex patterns
-    exclude: Optional[List[str]] = None,   # regex patterns
+    include: Optional[List[str]] = None,
+    exclude: Optional[List[str]] = None,
 ) -> Tuple[float, str, Dict[str, SignalTV]]:
     """
-    Load a VCD and return dict of signals: name -> SignalTV
-    include/exclude are regex patterns applied to the *reference name*.
+    Load a VCD and return name -> SignalTV.
+    include/exclude are regex patterns applied to reference names.
     """
     sec_per_tick, ts_label = parse_timescale_seconds(vcd_path)
 
     vcd = VCDVCD(vcd_path, store_tvs=True)
-    all_names = list(vcd.references_to_ids.keys())
+    names = list(vcd.references_to_ids.keys())
 
-    def _match_any(name: str, patterns: List[str]) -> bool:
-        return any(re.search(p, name) for p in patterns)
+    include_patterns = [re.compile(pattern) for pattern in include or []]
+    exclude_patterns = [re.compile(pattern) for pattern in exclude or []]
 
-    names = all_names
-    if include:
-        names = [n for n in names if _match_any(n, include)]
-    if exclude:
-        names = [n for n in names if not _match_any(n, exclude)]
+    if include_patterns:
+        names = [n for n in names if any(pattern.search(n) for pattern in include_patterns)]
+    if exclude_patterns:
+        names = [n for n in names if not any(pattern.search(n) for pattern in exclude_patterns)]
 
     out: Dict[str, SignalTV] = {}
-    for n in names:
-        tv = vcd[n].tv  # [(time_tick, value_str), ...] :contentReference[oaicite:2]{index=2}
+    for name in names:
+        tv = vcd[name].tv  # [(time_tick, value_str), ...]
         if not tv:
             continue
-        t_ticks = np.array([tt for (tt, _) in tv], dtype=np.int64)
-        v_raw = [vv for (_, vv) in tv]
-        out[n] = SignalTV(name=n, t_sec=t_ticks.astype(float) * sec_per_tick, v_raw=v_raw)
+
+        t_ticks = np.array([tt for tt, _ in tv], dtype=np.int64)
+        v_raw = [vv for _, vv in tv]
+        out[name] = SignalTV(
+            name=name,
+            t_sec=t_ticks.astype(float) * sec_per_tick,
+            v_raw=v_raw,
+        )
 
     return sec_per_tick, ts_label, out
 
@@ -136,26 +186,32 @@ def split_digital_analogue(signals: Dict[str, SignalTV]) -> Tuple[List[str], Lis
       - analogue: everything else (reals, vectors, integers, etc.)
     """
     digital, analogue = [], []
-    for name, s in signals.items():
-        if all(_is_scalar_digital_value(v) for v in s.v_raw):
+    for name, signal in signals.items():
+        if all(_is_scalar_digital_value(v) for v in signal.v_raw):
             digital.append(name)
         else:
             analogue.append(name)
     return digital, analogue
 
 
+def get_end_time(signals: Mapping[str, SignalTV]) -> float:
+    return max((float(signal.t_sec[-1]) for signal in signals.values() if signal.t_sec.size), default=0.0)
+
+
 # ----------------------------
 # Binning helpers (min/max for analogue; last-value for digital)
 # ----------------------------
 def make_time_bins(t_end: float, n_bins: int) -> np.ndarray:
+    if n_bins < 1:
+        raise ValueError("n_bins must be >= 1")
     if t_end <= 0:
         return np.array([0.0, 1.0])
     return np.linspace(0.0, t_end, int(n_bins) + 1)
 
+
 def bin_last_value(t: np.ndarray, v: np.ndarray, edges: np.ndarray) -> np.ndarray:
     """
     For each bin, return the last value at or before bin end.
-    v should already be numeric (0/1/NaN etc.).
     """
     ends = edges[1:]
     idx = np.searchsorted(t, ends, side="right") - 1
@@ -164,16 +220,16 @@ def bin_last_value(t: np.ndarray, v: np.ndarray, edges: np.ndarray) -> np.ndarra
     out[good] = v[idx[good]]
     return out
 
+
 def bin_min_max(t: np.ndarray, v: np.ndarray, edges: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    For each bin [edges[i], edges[i+1]), compute min/max over values that occur in that time span,
+    For each bin [edges[i], edges[i+1]), compute min/max over values in that span,
     including the value active at the bin start (piecewise-constant signals).
     """
     n = len(edges) - 1
     vmin = np.full(n, np.nan, dtype=float)
     vmax = np.full(n, np.nan, dtype=float)
 
-    # indices of first change in each bin (start), and first change after each bin (end)
     i0 = np.searchsorted(t, edges[:-1], side="left")
     i1 = np.searchsorted(t, edges[1:], side="left")
 
@@ -181,11 +237,8 @@ def bin_min_max(t: np.ndarray, v: np.ndarray, edges: np.ndarray) -> Tuple[np.nda
         a, b = int(i0[i]), int(i1[i])
         candidates = []
 
-        # value active at bin start = last value before edges[i]
         if a > 0:
             candidates.append(v[a - 1])
-
-        # values that change within the bin
         if b > a:
             candidates.extend(v[a:b])
 
@@ -208,28 +261,27 @@ def plot_digital_grid(
     edges: np.ndarray,
     *,
     label_fontsize: int = 7,
+    display_map: Optional[Mapping[str, str]] = None,
 ):
     """
     Clean timing diagram style grid:
       y = signals, x = time, color = off/on/unknown
     """
-    # build matrix: (n_signals, n_bins) in {0,1,2} where 2=unknown
     mats = []
-    for n in names:
-        s = signals[n]
-        v_num = np.array([vcd_value_to_float(v) for v in s.v_raw], dtype=float)  # 0/1/NaN
-        b = bin_last_value(s.t_sec, v_num, edges)
-        state = np.full_like(b, 2, dtype=int)          # unknown
-        state[np.isfinite(b) & (b <= 0.5)] = 0         # off
-        state[np.isfinite(b) & (b > 0.5)] = 1          # on
+    for name in names:
+        signal = signals[name]
+        v_num = np.array([vcd_value_to_float(v) for v in signal.v_raw], dtype=float)
+        binned = bin_last_value(signal.t_sec, v_num, edges)
+
+        state = np.full_like(binned, 2, dtype=int)  # unknown
+        state[np.isfinite(binned) & (binned <= 0.5)] = 0
+        state[np.isfinite(binned) & (binned > 0.5)] = 1
         mats.append(state)
 
     if not mats:
         raise ValueError("No digital signals to plot.")
 
-    M = np.vstack(mats)  # (signals, bins)
-
-    x_edges = edges
+    matrix = np.vstack(mats)
     y_edges = np.arange(len(names) + 1, dtype=float)
 
     cmap = ListedColormap(["darkred", "lime", "0.75"])
@@ -237,8 +289,11 @@ def plot_digital_grid(
 
     fig, ax = plt.subplots(figsize=(18, max(6, 0.25 * len(names))), constrained_layout=True)
     ax.pcolormesh(
-        x_edges, y_edges, M,
-        cmap=cmap, norm=norm,
+        edges,
+        y_edges,
+        matrix,
+        cmap=cmap,
+        norm=norm,
         shading="flat",
         edgecolors=(0, 0, 0, 0.06),
         linewidth=0.05,
@@ -246,7 +301,7 @@ def plot_digital_grid(
     )
 
     ax.set_yticks(np.arange(len(names)) + 0.5)
-    ax.set_yticklabels(names, fontsize=label_fontsize)
+    ax.set_yticklabels([display_name(name, display_map) for name in names], fontsize=label_fontsize)
     ax.invert_yaxis()
 
     ax.set_xlabel("Time (s)")
@@ -263,6 +318,7 @@ def plot_analogue_minmax_stacked(
     *,
     label_fontsize: int = 7,
     show_center_line: bool = True,
+    display_map: Optional[Mapping[str, str]] = None,
 ):
     """
     Stacked axes: each channel shows a min-max envelope per time bin.
@@ -276,16 +332,14 @@ def plot_analogue_minmax_stacked(
     if n == 1:
         axs = [axs]
 
-    # step-style x for envelopes
-    x_step = np.repeat(edges, 2)[1:-1]  # length 2*n_bins
+    x_step = np.repeat(edges, 2)[1:-1]
 
     for i, name in enumerate(names):
         ax = axs[i]
-        s = signals[name]
-        v = np.array([vcd_value_to_float(vv) for vv in s.v_raw], dtype=float)
+        signal = signals[name]
+        v = np.array([vcd_value_to_float(vv) for vv in signal.v_raw], dtype=float)
 
-        vmin, vmax = bin_min_max(s.t_sec, v, edges)
-        # convert bins to step arrays
+        vmin, vmax = bin_min_max(signal.t_sec, v, edges)
         vmin_s = np.repeat(vmin, 2)
         vmax_s = np.repeat(vmax, 2)
 
@@ -295,7 +349,6 @@ def plot_analogue_minmax_stacked(
             mid = 0.5 * (vmin + vmax)
             ax.plot(x_step, np.repeat(mid, 2), linewidth=1.0)
 
-        # right-side min/max ticks (like your old plot style)
         finite = np.isfinite(vmin) & np.isfinite(vmax)
         if np.any(finite):
             lo = float(np.nanmin(vmin[finite]))
@@ -307,16 +360,16 @@ def plot_analogue_minmax_stacked(
 
         ax.yaxis.set_ticks_position("right")
         ax.tick_params(axis="y", left=False, right=True, labelsize=label_fontsize)
-
-        # left label
         ax.text(
-            -0.01, 0.5, name,
+            -0.01,
+            0.5,
+            display_name(name, display_map),
             transform=ax.transAxes,
-            ha="right", va="center",
+            ha="right",
+            va="center",
             fontsize=label_fontsize,
             clip_on=False,
         )
-
         ax.spines["left"].set_visible(False)
 
     axs[-1].set_xlabel("Time (s)")
@@ -328,32 +381,40 @@ def plot_analogue_minmax_stacked(
 # Example usage
 # ----------------------------
 if __name__ == "__main__":
-    vcd_path = "./results/2026-01-12/18/000000878-MOTLoadExp/trace.vcd"
+    vcd_path = "./results/2026-02-19/16/000001001-LoadMOTToTweezersImageTEMPExp/trace.vcd"
+    alias_map = build_reverse_alias_map(_ALIASES)
 
-    # Use include/exclude to avoid plotting *everything*
-    sec_per_tick, ts_label, sigs = load_vcd_signals(
+    _, _, signals = load_vcd_signals(
         vcd_path,
-        include=None,                    # e.g. [r"^top\.", r"adc", r"dac"]
-        exclude=[r"\$"],                 # often skips internal "$" refs if any
+        include=None,
+        exclude=[r"\$"],
     )
 
-    digital_names, analogue_names = split_digital_analogue(sigs)
+    display_map = build_display_name_map(list(signals.keys()), alias_map)
+    digital_names, analogue_names = split_digital_analogue(signals)
+    digital_names.sort(key=lambda n: display_map[n])
+    analogue_names.sort(key=lambda n: display_map[n])
 
-    # Determine end time from loaded signals
-    t_end = 0.0
-    for s in sigs.values():
-        t_end = max(t_end, float(np.max(s.t_sec)))
-
-    # Choose column count: controls “diagram” resolution (and min/max binning)
+    t_end = get_end_time(signals)
     n_bins = 3000
     edges = make_time_bins(t_end, n_bins)
 
-    # Digital timing grid (no step-name blocks, no rescaling)
     if digital_names:
-        fig, ax = plot_digital_grid(sigs, digital_names, edges, label_fontsize=6)
+        _, _ = plot_digital_grid(
+            signals,
+            digital_names,
+            edges,
+            label_fontsize=6,
+            display_map=display_map,
+        )
         plt.show()
 
-    # Analogue min–max envelopes
     if analogue_names:
-        fig, axs = plot_analogue_minmax_stacked(sigs, analogue_names, edges, label_fontsize=6)
+        _, _ = plot_analogue_minmax_stacked(
+            signals,
+            analogue_names,
+            edges,
+            label_fontsize=6,
+            display_map=display_map,
+        )
         plt.show()
