@@ -29,5 +29,7 @@ aliases = {
     "dds_cpld_rsc": "urukul6_cpld",
     # Main table:
     "ttl_quad": "ttl16",
+    ## SUServo channels
+    "suservo_ch_817": "suservo0_ch0",
     "spec_seq_awg0": "ttl16" #TODO: REMOVE
 }

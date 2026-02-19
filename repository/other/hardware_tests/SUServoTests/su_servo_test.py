@@ -64,7 +64,3 @@ class SUServoTest(EnvExperiment):
 
         # A 10 MHz DDS signal is generated from the example above, with amplitude 
         # controllable by ADC.
-
-        # NOTE: I don't understand how this works exactly, as it seems based on the 
-        # wording that there's no feedback! Unless I'm mistaken.
-        #  The amplitude of the urukul is just a functino of the ADC input voltage
