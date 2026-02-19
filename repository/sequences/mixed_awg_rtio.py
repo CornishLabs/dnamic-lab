@@ -704,7 +704,14 @@ class LoadMOTToTweezers(Fragment,AWGContributor):
                            8*V,
                            min=0*V, max=10*V
                            )
-        # TODO: Bind the start of CompressMOT to the end of LoadRbMOT
+        
+        
+        # Bind the start of CompressMOT to the end of LoadRbMOT
+        for dir in ['NS', 'EW', 'UD']:
+            handle = self.setattr_param_like(f"loading_{dir}_setpoint", self.Rb_MOT_loader.MOT_set_shims, f"{dir}_setpoint")
+            self.Rb_MOT_loader.MOT_set_shims.bind_param(f"{dir}_setpoint", handle)
+            self.Rb_MOT_compressor.shim_ramp_after_MOT.bind_param(f"{dir}_start_setpoint", handle)
+
     
     def contribute_awg(self, builder):
         self.init_817_awg.contribute_awg(builder)
@@ -816,7 +823,6 @@ class LoadMOTToTweezersImage(ExpFragment):
         # Push image into dataset and HDF5
         self.tweezers_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
-
 
 
 LoadMOTToTweezersImageTEMPExp = make_fragment_scan_exp(LoadMOTToTweezersImage)
