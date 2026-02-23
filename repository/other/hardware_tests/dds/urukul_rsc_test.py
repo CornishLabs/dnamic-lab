@@ -1,11 +1,13 @@
-from artiq.experiment import *
+from artiq.language.units import MHz, dB, s, ms, us, V
+from artiq.language.core import delay, kernel, rpc
+from artiq.language.environment import EnvExperiment
 from artiq.coredevice.ad9910 import (
     RAM_DEST_ASF,
     RAM_MODE_DIRECTSWITCH,
     RAM_MODE_RAMPUP,
-    RAM_MODE_CONT_RAMPUP,
-    AD9910
+    AD9910,
 )
+from artiq.coredevice.urukul import CPLD
 import numpy as np
 
 class UrukulToneRAMExample(EnvExperiment):
@@ -15,6 +17,7 @@ class UrukulToneRAMExample(EnvExperiment):
         self.setattr_device("ttl0")
 
         self.setattr_device("dds_cpld_rsc")
+        self.dds_cpld_rsc: CPLD
         self.setattr_device("dds_ch_RB1B")
         self.dds_ch_RB1B: AD9910
         self.setattr_device("dds_ch_RB2")
