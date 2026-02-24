@@ -32,6 +32,8 @@ invariants, and requests arguments.
 There are some problems with this regarding composability. It encourages a big god object sat inside run, and is hard to compose and maintain sequences.
 The `ndscan` library aims to solve this.
 
+To convert from a default artiq `EnvExperiment` to an ndscan `Fragment` (or `ExpFragment` if it makes sense to run in isolation). You want to: turn `build` into a `build_fragment`; ideally fold the contents of `prepare` into `build_fragment` unless there's good performance reasons not to; consider adding `host_setup`, `device_setup` and their equivelent teardown methods; and turn `run` -> `run_once` if you want it to be an `ExpFragment`.
+
 
 > [!WARNING]  
 > The below mermaid diagrams were generated with generative AI, they may be incorrect.

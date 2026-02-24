@@ -11,8 +11,8 @@ import math
 from repository.models.atom_response import p_bright_detuned_rabi
 from repository.components import PrepareAtom, Pulse, ReadoutFluorescence
 
-from repository.reusable.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
-from repository.reusable.single_shot_base import SingleShotBase
+from repository.lib.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
+from repository.lib.single_shot_base import SingleShotBase
 
 class OneShot(SingleShotBase):
     def build_fragment(self):
