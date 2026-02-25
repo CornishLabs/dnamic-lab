@@ -14,33 +14,180 @@ from artiq.coredevice.urukul import CPLD
 from artiq.coredevice.ttl import TTLOut
 
 from ndscan.experiment import Fragment, ExpFragment
-from ndscan.experiment.parameters import IntParam
+from ndscan.experiment.parameters import IntParam, FloatParam
 
+"""
+      z || RB4 (antiparallel)
+      
+      |
+      |
+      +------ y || RB2 (parallel)
+     /
+    /
+   x || B || RB1A/B (antiparallel)
 
-# SET ASSUMING 400 STEPS IN RAM FOR PULSE
-RB2_STEPS = [1, 42, 62, 92, 50] # [P0,P1,P2,P3,...] Note P0 rate meaningless
-RB2_PROF_TIMES_US = [4e-3*400*steps for steps in RB2_STEPS]
+   
+  P6  110-------111 P7
+     / |       / |
+    /  |      /  |
+P2 010-----011 P3|
+   |   |     |   |
+   |P4 100---|--101 P5
+   | /       | /
+   |/        |/
+P0 000-------001 P1
+"""
 
-RB4_STEPS = [1, 142, 215, 175, 210, 158, 170, 312] # [P1,P2,P3,...] Note P0 rate meaningless
-RB4_PROF_TIMES_US = [4e-3*400*steps for steps in RB4_STEPS]
-
-# [Rad, Rad, Ax N-1, Ax N-2, Ax N-3, Ax N-4, Spec/SpinFlip]
-RB1B_FREQS_MHz = [120.0, 100.063, 100.032, 99.988, 100.0095, 100.032, 100.0545, 99.829]
-RB1B_amps = [0.0,0.87, 0.87, 0.37, 0.37, 0.37, 0.37, 0.37]
-
+# SET ASSUMING 400 STEPS IN RAM FOR PULSE (Tukey)
+RB2_STEPS = [1, 42, 62, 92, 50, 1, 1, 1]
+#RB2_PROF_TIMES_US = [4e-3*400*steps for steps in RB2_STEPS]
 RB2_PROFILE_HUMAN_NAMES = ['off','R1','R1longer','unused','R2','unused','RbFlip','CsFlip']
+RB2_AMP_SCALE = 0.47
+
+# SET ASSUMING 400 STEPS IN RAM FOR PULSE (BH)
+RB4_STEPS = [1, 142, 215, 175, 210, 158, 170, 312]
+#RB4_PROF_TIMES_US = [4e-3*400*steps for steps in RB4_STEPS]
 RB4_PROFILE_HUMAN_NAMES = ['off','unused','Zm1Weird','Zm1','Zm2','Zm3','Zm4','unused']
+RB4_AMP_SCALE = 0.8
+
+RB1B_FREQS_MHZ = [120.0, 100.063, 100.032, 99.988, 100.0095, 100.032, 100.0545, 99.829]
+RB1B_AXIAL_AMP = 0.37
+RB1B_RADIAL_AMP = 0.87
+RB1B_AMPS = [0.0,RB1B_RADIAL_AMP, RB1B_RADIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_RADIAL_AMP]
+RB1B_PROFILE_HUMAN_NAMES = ['off', 'R2', 'R1', 'Zm1', 'Zm2', 'Zm3', 'Zm4','RbFlip']
+
+OP_TIME_US = 15
+
+OP12_FREQ_MHZ = 110.0
+OP22_FREQ_MHZ = 200.0
+OP34_FREQ_MHZ = 110.0
+OP44_FREQ_MHZ = 200.0
+
+OP12_AMP = 0.5
+OP22_AMP = 0.5
+OP34_AMP = 0.5
+OP44_AMP = 0.5
 
 class UrukulRSCExample(Fragment):
     
     def build_fragment(self):
         # ARGUMENTS
-        for prof_name in RB2_PROFILE_HUMAN_NAMES:
-            self.setattr_param(f'RB2_{prof_name}_cycles_per_step', IntParam)
+
+        ## OP settings
+        self.setattr_param('OP_time_us',
+                           FloatParam,
+                           "How long to OP between Raman pulses (us)",
+                           unit=us,
+                           default=OP_TIME_US, min=1.0, max=200.0
+                        )
+        
+        self.setattr_param('OP12_frequency_MHz',
+            FloatParam,
+            "Frequency played for OP goes to AOM",
+            unit=MHz,
+            default=OP12_FREQ_MHZ, min=1.0, max=200.0
+        )
+        
+        self.setattr_param('OP22_frequency_MHz',
+            FloatParam,
+            "Frequency played for OP goes to AOM",
+            unit=MHz,
+            default=OP22_FREQ_MHZ, min=1.0, max=200.0
+        )
+
+        self.setattr_param('OP34_frequency_MHz',
+            FloatParam,
+            "Frequency played for OP goes to AOM",
+            unit=MHz,
+            default=OP34_FREQ_MHZ, min=1.0, max=200.0
+        )
+        
+        self.setattr_param('OP44_frequency_MHz',
+            FloatParam,
+            "Frequency played for OP goes to AOM",
+            unit=MHz,
+            default=OP44_FREQ_MHZ, min=1.0, max=200.0
+        )
+
+        self.setattr_param('OP12_Amp',
+            FloatParam,
+            "Amp relative to full scale (0-1) to AOM",
+            unit=MHz,
+            default=OP12_AMP, min=0.0, max=1.0
+        )
+        
+        self.setattr_param('OP22_Amp',
+            FloatParam,
+            "Amp relative to full scale (0-1) to AOM",
+            unit=MHz,
+            default=OP22_AMP, min=0.0, max=1.0
+        )
+
+        self.setattr_param('OP34_Amp',
+            FloatParam,
+            "Amp relative to full scale (0-1) to AOM",
+            unit=MHz,
+            default=OP34_AMP, min=0.0, max=1.0
+        )
+        
+        self.setattr_param('OP44_Amp',
+            FloatParam,
+            "Amp relative to full scale (0-1) to AOM",
+            unit=MHz,
+            default=OP44_AMP, min=0.0, max=1.0
+        )
+        
+        self.setattr_param('OP_time_us',
+            FloatParam,
+            "How long to OP between Raman pulses (us)",
+            unit=us,
+            default=OP_TIME_US, min=1.0, max=200.0
+        )
+
+        ## Single tone RSC beams
+        for i in range(1,8):
+            prof_name = RB1B_PROFILE_HUMAN_NAMES[i]
+            self.setattr_param(f'RB1B_{prof_name}_frequency_MHz', 
+                    FloatParam,
+                    "Frequency played for profile goes to AOM",
+                    unit=MHz,
+                    default=RB1B_FREQS_MHZ[i], min=1, max=5000,  # Not sure what the actual max is
+                )
+
+            self.setattr_param(f'RB1B_{prof_name}_amp', 
+                    FloatParam,
+                    "Amp played for profile (0-1, relative to full scale)",
+                    default=RB1B_AMPS[i], min=0.0, max=1.0,  # Not sure what the actual max is
+                )
+
+        ## RAM mode RSC beams
+        for i in range(1,8):
+            prof_name = RB2_PROFILE_HUMAN_NAMES[i]
+            self.setattr_param(f'RB2_{prof_name}_cycles_per_step', 
+                               IntParam, 
+                               "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
+                               default=RB2_STEPS[i], min=1, max=5000,  # Not sure what the actual max is
+                            )
+            
+        self.setattr_param('RB2_amp_scale', 
+                    FloatParam, "Scale RAM pulse by this factor (scaling an envelope with a peak of 1)",
+                    default=RB2_AMP_SCALE, min=0.0, max=1.0
+                    )
+        
+        for i in range(1,8):
+            prof_name = RB4_PROFILE_HUMAN_NAMES[i]
+            self.setattr_param(f'RB4_{prof_name}_cycles_per_step', 
+                               IntParam, 
+                               "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
+                               default=RB4_STEPS[i], min=1, max=5000,  # Not sure what the actual max is
+                            )
+        self.setattr_param('RB4_amp_scale', 
+            FloatParam, "Scale RAM pulse by this factor (scaling an envelope with a peak of 1)",
+            default=RB4_AMP_SCALE, min=0.0, max=1.0
+        )
         
         for prof_name in RB4_PROFILE_HUMAN_NAMES:
             self.setattr_param(f'RB4_{prof_name}_cycles_per_step', IntParam)
-
 
         # DEVICES
         self.setattr_device("core")
@@ -49,26 +196,35 @@ class UrukulRSCExample(Fragment):
         self.ttl0: TTLOut
         
         self.dds_cpld_rsc: CPLD = self.get_device("dds_cpld_rsc")
+        self.dds_ch_RB1A: AD9910 = self.get_device("dds_ch_RB1A")
         self.dds_ch_RB1B: AD9910 = self.get_device("dds_ch_RB1B")
         self.dds_ch_RB2: AD9910 = self.get_device("dds_ch_RB2")
         self.dds_ch_RB4: AD9910 = self.get_device("dds_ch_RB4")
-        
+
         kernel_invariants = getattr(self, "kernel_invariants", set())
-        self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4"}
+        self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4"}
+
+    def host_setup(self):
+        super().host_setup()
+
+        # Lazy prepare (could be in prepare instead)
+        self.compute_full_scale_RAM_profiles()
+        
     
-    def prepare(self):
+    def compute_full_scale_RAM_profiles(self):
+        # Convention is that all RAM profiles are:
+        # off, on, [BH]
+
         # Prepare pulse shape RAM for RB2 (radial -> Tukey pulse)
-        # off , on , BH
+        
         self.tukey_steps = 400
         alpha = 0.5  # Tukey shape: 0=rectangular, 1=Hann
 
         self.amp_logical_rb2 = [0.0,0.7] # Useful for direct switch square pulses
         
-        N = self.tukey_steps
         tk = []
-
-        for n in range(N):
-            x = n / (N - 1)  # normalized position in [0, 1]
+        for n in range(self.tukey_steps):
+            x = n / (self.tukey_steps - 1)  # normalized position in [0, 1]
 
             if alpha <= 0:
                 w = 1.0
@@ -89,11 +245,6 @@ class UrukulRSCExample(Fragment):
 
             tk.append(w)
 
-        # scale (your original scaling style)
-        peak = max(tk)
-        if peak > 0:
-            tk = [0.6 * v / peak for v in tk]
-
         self.amp_logical_rb2 += tk
         
         self.asf_ram_rb2 = [0] * len(self.amp_logical_rb2) # Create array to put RAM words into
@@ -113,10 +264,6 @@ class UrukulRSCExample(Fragment):
             x = n/(self.bh_steps-1)
             w = a0 - a1*np.cos(twopi*x) + a2*np.cos(2*twopi*x) - a3*np.cos(3*twopi*x)
             bh.append(w)
-        # scale
-        peak = max(bh)
-        if peak > 0:
-            bh = [0.6*v/peak for v in bh]
 
         self.amp_logical_rb4 += bh
         
@@ -235,39 +382,45 @@ class UrukulRSCExample(Fragment):
         delay(20*us)
         dds.set_profile(0) # Set profile pins to default
         delay(20*us)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[1], profile=1)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[2], profile=2)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[3], profile=3)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[4], profile=4)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[5], profile=5)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[6], profile=6)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_amps[7], profile=7)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[1], profile=1)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[2], profile=2)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[3], profile=3)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[4], profile=4)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[5], profile=5)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[6], profile=6)
+        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[7], profile=7)
 
         dds.set(frequency=0.5*MHz, phase=0.0, amplitude=0.0, profile=0) # Off
         delay(20*us) #Give some time for io update after
         dds.set_profile(0) # Set profile pins to default
         delay(20*us)
-        
-    
-    @kernel
-    def run(self):
-        self.core.reset()
-        self.core.break_realtime()
-        # Initialise and setup urukul cpld, channels, and attenuators
-        self.dds_cpld_rsc.init()
-        self.init_dds(self.dds_ch_RB1B)
-        self.core.break_realtime()
-        self.init_dds(self.dds_ch_RB2)
-        self.core.break_realtime()
-        self.init_dds(self.dds_ch_RB4)
 
-        self.core.break_realtime()
+    @kernel
+    def device_setup(self):
+        self.device_setup_subfragments() # Should be NO-OP for this fragment
+
+        # TODO: Make this do nothing if no params changed
+                
         # Setup DDS RAM mode, upload RAM, and set profile registers
         self.configure_RB24_ram_mode(self.dds_ch_RB2,self.dds_ch_RB4)
         delay(10*us)
         self.configure_RB1AB_single_tone_mode(self.dds_ch_RB1B)
 
         self.core.break_realtime()
+
+    
+    @kernel
+    def play_rsc_pulses(self):
+        """
+        Assumptions:
+        - DDS CPLD, DDS Chs (AD9910s) are initialised, and that they have valid SYNC_CLK w.r.t RTIO
+            (see https://forum.m-labs.hk/d/1221-urukul-pr9-set-profile-non-deterministic-intermediate-hamming-path-activation)
+        - Profile settings (Profile settings, single tone/ram mode setup) are valid NOW. 
+            This fragment sets them in device_setup(). But this means caution must be 
+            applied if this method wanted to be called multiple times with different settings
+            in each sequence, as the last fragment set in build_fragment() will take precedence.
+        """
+
         # Profile playback
         # Note that set_profile actually advances the timeline
         # (by 0.86us when I measured it) so the delays for direct profile switches
@@ -275,13 +428,14 @@ class UrukulRSCExample(Fragment):
         # to do a preciscely timed square pulse with the RAM_MODE_DIRECTSWITCH mode.
         # This is because the configuration register of the CPLD is written over SPI
         # Which *then* changes the profile pins internally.
+
+        # Configure OP beams
+
+
         self.dds_ch_RB1B.cfg_sw(True) # Enable RF switch
         self.dds_ch_RB2.cfg_sw(True) # Enable RF switch
         self.dds_ch_RB4.cfg_sw(True) # Enable RF switch
 
-        self.ttl0.pulse(1*us) # scope trigger
-
-        OP_TIME = 15*us
         # Set RB1s first as the SPI delay of ~0.86us will give them a natural buffer
         for i in range(6): # Repeat 6 times
             # Axial n-4
@@ -469,3 +623,8 @@ class UrukulRSCExample(Fragment):
         self.dds_ch_RB4.cfg_sw(False) # Enable RF switch
 
 
+class UrukulRSCTestExperiment(ExpFragment):
+    # TODO: Make a test class that calls the initialisation of urukul channels, then runs
+    # the fragment defined above.
+    def __init__(self):
+        pass
