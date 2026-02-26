@@ -1,4 +1,5 @@
 import numpy as np
+from dataclasses import dataclass
 
 from artiq.language.units import MHz, dB, s, ms, us, V
 from artiq.language.core import delay, kernel, rpc, delay_mu
@@ -36,25 +37,171 @@ P2 010-----011 P3|
    | /       | /
    |/        |/
 P0 000-------001 P1
+
+TODO LIST:
+Setup RB1A/B in sequence rather than device setup
+Keep RB2/4 in device setup (and keep note)
 """
+# ---------- logical pulse (multiple lasers come on) definitions ----------
+@dataclass(frozen=True)
+class PulseDef:
+    rb1ab: str = "off"
+    rb2: str = "off"
+    rb4: str = "off"
+    duration_src: tuple[str, str] = ("rb2", "off")   # ("rb2" or "rb4", key)
 
-# SET ASSUMING 400 STEPS IN RAM FOR PULSE (Tukey)
-RB2_STEPS = [1, 42, 62, 92, 50, 1, 1, 1]
-#RB2_PROF_TIMES_US = [4e-3*400*steps for steps in RB2_STEPS]
-RB2_PROFILE_HUMAN_NAMES = ['off','R1','R1longer','unused','R2','unused','RbFlip','CsFlip']
-RB2_AMP_SCALE = 0.47
+# TODO: Could combine RAMProfData & RAMProfileLayout
+@dataclass(frozen=True)
+class RAMProfData:
+    steps_per_cycle: int = 1
 
-# SET ASSUMING 400 STEPS IN RAM FOR PULSE (BH)
-RB4_STEPS = [1, 142, 215, 175, 210, 158, 170, 312]
-#RB4_PROF_TIMES_US = [4e-3*400*steps for steps in RB4_STEPS]
-RB4_PROFILE_HUMAN_NAMES = ['off','unused','Zm1Weird','Zm1','Zm2','Zm3','Zm4','unused']
-RB4_AMP_SCALE = 0.8
+@dataclass(frozen=True)
+class RAMProfileLayout:
+    region: str   # "off", "on", "shape"
+    mode: int
 
-RB1B_FREQS_MHZ = [120.0, 100.063, 100.032, 99.988, 100.0095, 100.032, 100.0545, 99.829]
-RB1B_AXIAL_AMP = 0.37
-RB1B_RADIAL_AMP = 0.87
-RB1B_AMPS = [0.0,RB1B_RADIAL_AMP, RB1B_RADIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_AXIAL_AMP, RB1B_RADIAL_AMP]
-RB1B_PROFILE_HUMAN_NAMES = ['off', 'R2', 'R1', 'Zm1', 'Zm2', 'Zm3', 'Zm4','RbFlip']
+@dataclass(frozen=True)
+class RAMModeData:
+    amp_scale: float = 0.5
+    frequency_mhz: float = 110.0
+
+@dataclass(frozen=True)
+class SingleToneProfData:
+    amplitude: float = 0.5
+    frequency_mhz: float = 100.0
+    phase: float = 0.0
+
+
+
+# Mapping logical names to hardware profiles
+RB1AB_PROFILE = {
+    "off": 0,
+    "R2": 1,
+    "R1": 2, 
+    "Zm1": 3,
+    "Zm2": 4,
+    "Zm3": 5,
+    "Zm4": 6,
+    "RbFlip": 7,
+} #Both RB1A and RB1B share this mapping.
+RB1A_RADIAL_AMP_DEFAULT = 0.735
+RB1A_AXIAL_AMP_DEFAULT = 0.11
+RB1A_PROFILE_DEFAULT_INFO = {
+    "off":    SingleToneProfData(0.0,120.0,0.0),
+    "R2":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.110,  0.0),
+    "R1":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.083,  0.0), 
+    "Zm1":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.057,  0.0),
+    "Zm2":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.075,  0.0),
+    "Zm3":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.094,  0.0),
+    "Zm4":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.112,  0.0),
+    "RbFlip": SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT,  99.991,  0.0),
+}
+
+RB1B_RADIAL_AMP_DEFAULT = 0.49
+RB1B_AXIAL_AMP_DEFAULT = 0.183
+RB1B_PROFILE_DEFAULT_INFO = {
+    "off":    SingleToneProfData(0.0,120.0,0.0),
+    "R2":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.051,  0.0),
+    "R1":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.023,  0.0), 
+    "Zm1":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.977,  0.0),
+    "Zm2":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.996,  0.0),
+    "Zm3":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.015,  0.0),
+    "Zm4":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.034,  0.0),
+    "RbFlip": SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT,  99.920,  0.0),
+}
+
+### RB2 ###
+RB2_PROFILE = {
+    "off": 0,
+    "R1": 1,
+    "R1longer": 2,
+    "unused3": 3,
+    "R2": 4,
+    "unused5": 5,
+    "RbFlip": 6,
+    "CsFlip": 7,
+}
+
+RB2_RAM_SETTINGS_DEFAULT_INFO = RAMModeData(0.47,110.0)
+
+RB2_PROFILE_DEFAULT_INFO = {
+    "off": RAMProfData(1),
+    "R1": RAMProfData(42),
+    "R1longer": RAMProfData(62),
+    "unused3": RAMProfData(92),
+    "R2": RAMProfData(50),
+    "unused5": RAMProfData(1),
+    "RbFlip": RAMProfData(1),
+    "CsFlip": RAMProfData(1),
+}
+
+RB2_RAM_LAYOUT = {
+    "off":      RAMProfileLayout("off",   RAM_MODE_DIRECTSWITCH),
+    "R1":       RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "R1longer": RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "unused3":  RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "R2":       RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "unused5":  RAMProfileLayout("on",    RAM_MODE_DIRECTSWITCH),
+    "RbFlip":   RAMProfileLayout("on",    RAM_MODE_DIRECTSWITCH),
+    "CsFlip":   RAMProfileLayout("on",    RAM_MODE_DIRECTSWITCH),
+}
+
+### RB4 ###
+RB4_PROFILE = {
+    "off": 0,
+    "unused1": 1,
+    "Zm1weird": 2,
+    "Zm1": 3,
+    "Zm2": 4,
+    "Zm3": 5,
+    "Zm4": 6,
+    "unused7": 7,
+}
+
+RB4_RAM_SETTINGS_DEFAULT_INFO = RAMModeData(0.8,110.0)
+
+RB4_PROFILE_DEFAULT_INFO = {
+    "off": RAMProfData(1),
+    "unused1": RAMProfData(142),
+    "Zm1weird": RAMProfData(215),
+    "Zm1": RAMProfData(175),
+    "Zm2": RAMProfData(210),
+    "Zm3": RAMProfData(158),
+    "Zm4": RAMProfData(170),
+    "unused7": RAMProfData(312),
+}
+
+RB4_RAM_LAYOUT = {
+    "off":      RAMProfileLayout("off",   RAM_MODE_DIRECTSWITCH),
+    "unused1":  RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "Zm1weird": RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "Zm1":      RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "Zm2":      RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "Zm3":      RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "Zm4":      RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+    "unused7":  RAMProfileLayout("shape", RAM_MODE_RAMPUP),
+}
+
+## Pulses ##
+PULSES = {
+    "AX_ZM4":       PulseDef(rb1ab="Zm4", rb4="Zm4",       duration_src=("rb4", "Zm4")),
+    "AX_ZM3":       PulseDef(rb1ab="Zm3", rb4="Zm3",       duration_src=("rb4", "Zm3")),
+    "AX_ZM2":       PulseDef(rb1ab="Zm2", rb4="Zm2",       duration_src=("rb4", "Zm2")),
+    "AX_ZM1":       PulseDef(rb1ab="Zm1", rb4="Zm1",       duration_src=("rb4", "Zm1")),
+    "AX_ZM1_WEIRD": PulseDef(rb1ab="Zm1", rb4="Zm1weird",  duration_src=("rb4", "Zm1weird")),
+    "RAD_1":        PulseDef(rb1ab="R1",  rb2="R1",        duration_src=("rb2", "R1")),
+    "RAD_1_LONG":   PulseDef(rb1ab="R1",  rb2="R1longer",  duration_src=("rb2", "R1longer")),
+    "RAD_2":        PulseDef(rb1ab="R2",  rb2="R2",        duration_src=("rb2", "R2")),
+}
+
+SEQUENCE_BLOCKS = [
+    (6,  ("AX_ZM4", "RAD_1",      "AX_ZM4", "RAD_2")),
+    (10, ("AX_ZM3", "RAD_1",      "AX_ZM3", "RAD_2")),
+    (10, ("AX_ZM2", "RAD_1",      "AX_ZM2", "RAD_2")),
+    (15, ("AX_ZM2", "RAD_1_LONG", "AX_ZM1", "RAD_2",
+          "AX_ZM1_WEIRD", "RAD_1",
+          "AX_ZM2", "RAD_1_LONG", "AX_ZM1", "RAD_2")),
+]
 
 OP_TIME_US = 15
 
@@ -74,121 +221,135 @@ class UrukulRSCExample(Fragment):
         # ARGUMENTS
 
         ## OP settings
-        self.setattr_param('OP_time_us',
+        self.setattr_param('OP_time',
                            FloatParam,
                            "How long to OP between Raman pulses (us)",
-                           unit=us,
-                           default=OP_TIME_US, min=1.0, max=200.0
+                           default=OP_TIME_US*us, min=1.0*us, max=200.0*us,
+                           unit='us',
                         )
         
-        self.setattr_param('OP12_frequency_MHz',
+        self.setattr_param('OP12_frequency',
             FloatParam,
             "Frequency played for OP goes to AOM",
-            unit=MHz,
-            default=OP12_FREQ_MHZ, min=1.0, max=200.0
+            default=OP12_FREQ_MHZ*MHz, min=1.0*MHz, max=200.0*MHz,
+            unit='MHz',
         )
         
-        self.setattr_param('OP22_frequency_MHz',
+        self.setattr_param('OP22_frequency',
             FloatParam,
             "Frequency played for OP goes to AOM",
-            unit=MHz,
-            default=OP22_FREQ_MHZ, min=1.0, max=200.0
+            default=OP22_FREQ_MHZ*MHz, min=1.0*MHz, max=200.0*MHz,
+            unit='MHz'
         )
 
-        self.setattr_param('OP34_frequency_MHz',
+        self.setattr_param('OP34_frequency',
             FloatParam,
             "Frequency played for OP goes to AOM",
-            unit=MHz,
-            default=OP34_FREQ_MHZ, min=1.0, max=200.0
+            default=OP34_FREQ_MHZ*MHz, min=1.0*MHz, max=200.0*MHz,
+            unit='MHz'
         )
         
-        self.setattr_param('OP44_frequency_MHz',
+        self.setattr_param('OP44_frequency',
             FloatParam,
             "Frequency played for OP goes to AOM",
-            unit=MHz,
-            default=OP44_FREQ_MHZ, min=1.0, max=200.0
+            default=OP44_FREQ_MHZ*MHz, min=1.0*MHz, max=200.0*MHz,
+            unit='MHz'
         )
 
-        self.setattr_param('OP12_Amp',
+        self.setattr_param('OP12_amp',
             FloatParam,
             "Amp relative to full scale (0-1) to AOM",
-            unit=MHz,
             default=OP12_AMP, min=0.0, max=1.0
         )
         
-        self.setattr_param('OP22_Amp',
+        self.setattr_param('OP22_amp',
             FloatParam,
             "Amp relative to full scale (0-1) to AOM",
-            unit=MHz,
             default=OP22_AMP, min=0.0, max=1.0
         )
 
-        self.setattr_param('OP34_Amp',
+        self.setattr_param('OP34_amp',
             FloatParam,
             "Amp relative to full scale (0-1) to AOM",
-            unit=MHz,
             default=OP34_AMP, min=0.0, max=1.0
         )
         
-        self.setattr_param('OP44_Amp',
+        self.setattr_param('OP44_amp',
             FloatParam,
             "Amp relative to full scale (0-1) to AOM",
-            unit=MHz,
             default=OP44_AMP, min=0.0, max=1.0
         )
         
-        self.setattr_param('OP_time_us',
-            FloatParam,
-            "How long to OP between Raman pulses (us)",
-            unit=us,
-            default=OP_TIME_US, min=1.0, max=200.0
-        )
-
         ## Single tone RSC beams
-        for i in range(1,8):
-            prof_name = RB1B_PROFILE_HUMAN_NAMES[i]
-            self.setattr_param(f'RB1B_{prof_name}_frequency_MHz', 
-                    FloatParam,
-                    "Frequency played for profile goes to AOM",
-                    unit=MHz,
-                    default=RB1B_FREQS_MHZ[i], min=1, max=5000,  # Not sure what the actual max is
-                )
+        ### RB1A
+        self.RB1A_frequency_param_handles = {}
+        self.RB1A_amp_param_handles = {}
+        for key, default in RB1A_PROFILE_DEFAULT_INFO.items():
+            
+            name = f"RB1A_{key}_frequency"
+            param_handle = self.setattr_param(name, FloatParam,
+                 "Frequency played for profile goes to AOM",
+                default=default.frequency_mhz*MHz, min=1*MHz, max=5000*MHz)
+            self.RB1A_frequency_param_handles[key] = param_handle
+            
+            name = f"RB1A_{key}_amp"
+            param_handle= self.setattr_param(name, 
+                FloatParam,
+                "Amp played for profile (0-1, relative to full scale)",
+                default=default.amplitude, min=0.0, max=1.0
+            )
+            self.RB1A_amp_param_handles[key] = param_handle
 
-            self.setattr_param(f'RB1B_{prof_name}_amp', 
-                    FloatParam,
-                    "Amp played for profile (0-1, relative to full scale)",
-                    default=RB1B_AMPS[i], min=0.0, max=1.0,  # Not sure what the actual max is
-                )
+        ### RB1B
+        self.RB1B_frequency_param_handles = {}
+        self.RB1B_amp_param_handles = {}
+        for key, default in RB1B_PROFILE_DEFAULT_INFO.items():
+            
+            name = f"RB1B_{key}_frequency"
+            param_handle = self.setattr_param(name, FloatParam,
+                 "Frequency played for profile goes to AOM",
+                default=default.frequency_mhz*MHz, min=1*MHz, max=5000*MHz)
+            self.RB1B_frequency_param_handles[key] = param_handle
+            
+            name = f"RB1B_{key}_amp"
+            param_handle= self.setattr_param(name, 
+                FloatParam,
+                "Amp played for profile (0-1, relative to full scale)",
+                default=default.amplitude, min=0.0, max=1.0
+            )
+            self.RB1B_amp_param_handles[key] = param_handle
 
         ## RAM mode RSC beams
-        for i in range(1,8):
-            prof_name = RB2_PROFILE_HUMAN_NAMES[i]
-            self.setattr_param(f'RB2_{prof_name}_cycles_per_step', 
-                               IntParam, 
-                               "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
-                               default=RB2_STEPS[i], min=1, max=5000,  # Not sure what the actual max is
-                            )
+        ### RB2
+        self.RB2_cps_param_handles = {}
+        for key, default in RB2_PROFILE_DEFAULT_INFO.items():
+            
+            name = f"RB2_{key}_cycles_per_step"
+            param_handle = self.setattr_param(name, IntParam,
+                "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
+                default=default.steps_per_cycle, min=1, max=65534)
+            self.RB2_cps_param_handles[key] = param_handle
             
         self.setattr_param('RB2_amp_scale', 
                     FloatParam, "Scale RAM pulse by this factor (scaling an envelope with a peak of 1)",
-                    default=RB2_AMP_SCALE, min=0.0, max=1.0
+                    default=RB2_RAM_SETTINGS_DEFAULT_INFO.amp_scale, min=0.0, max=1.0
                     )
         
-        for i in range(1,8):
-            prof_name = RB4_PROFILE_HUMAN_NAMES[i]
-            self.setattr_param(f'RB4_{prof_name}_cycles_per_step', 
-                               IntParam, 
-                               "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
-                               default=RB4_STEPS[i], min=1, max=5000,  # Not sure what the actual max is
-                            )
+        ### RB4
+        self.RB4_cps_param_handles = {}
+        for key, default in RB4_PROFILE_DEFAULT_INFO.items():
+            
+            name = f"RB4_{key}_cycles_per_step"
+            param_handle = self.setattr_param(name, IntParam,
+                "How many cycles of SYNC_CLK (normally 4ns/cycle) before changing RAM step",
+                default=default.steps_per_cycle, min=1, max=65534)
+            self.RB4_cps_param_handles[key] = param_handle
+            
         self.setattr_param('RB4_amp_scale', 
-            FloatParam, "Scale RAM pulse by this factor (scaling an envelope with a peak of 1)",
-            default=RB4_AMP_SCALE, min=0.0, max=1.0
-        )
+                    FloatParam, "Scale RAM pulse by this factor (scaling an envelope with a peak of 1)",
+                    default=RB4_RAM_SETTINGS_DEFAULT_INFO.amp_scale, min=0.0, max=1.0
+                    )
         
-        for prof_name in RB4_PROFILE_HUMAN_NAMES:
-            self.setattr_param(f'RB4_{prof_name}_cycles_per_step', IntParam)
-
         # DEVICES
         self.setattr_device("core")
         self.core: Core
@@ -200,20 +361,71 @@ class UrukulRSCExample(Fragment):
         self.dds_ch_RB1B: AD9910 = self.get_device("dds_ch_RB1B")
         self.dds_ch_RB2: AD9910 = self.get_device("dds_ch_RB2")
         self.dds_ch_RB4: AD9910 = self.get_device("dds_ch_RB4")
-
+        self.dds_ch_rb_op22: AD9910 = self.get_device("dds_ch_rb_op22")
+        self.dds_ch_rb_op12: AD9910 = self.get_device("dds_ch_rb_op12")
+        self.dds_ch_cs_op44: AD9910 = self.get_device("dds_ch_cs_op44")
+        self.dds_ch_cs_op34: AD9910 = self.get_device("dds_ch_cs_op34")
+ 
         kernel_invariants = getattr(self, "kernel_invariants", set())
-        self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4"}
+        self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4", "dds_ch_rb_op22", "dds_ch_rb_op12", "dds_ch_cs_op44", "dds_ch_cs_op34"}
 
-    def host_setup(self):
-        super().host_setup()
 
-        # Lazy prepare (could be in prepare instead)
-        self.compute_full_scale_RAM_profiles()
-        
+
+    def _ceil8_mu(self, mu: int) -> int:
+        return (mu + 7) & ~7
+
+    def _ram_duration_mu(self, cycles_per_step: int, n_steps: int) -> int:
+        # 4 ns * cycles_per_step * n_steps
+        mu = self.core.seconds_to_mu(cycles_per_step * 4e-9 * n_steps)
+        return self._ceil8_mu(mu)
     
-    def compute_full_scale_RAM_profiles(self):
+    def _compile_sequence(self):
+        
+        # Work out how long the RAM pulses will take beforehand
+        RB2_dur_mu = {}
+        for key, param_handle in self.RB2_cps_param_handles.items():
+            RB2_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.tukey_steps)
+
+        RB4_dur_mu = {}
+        for key, param_handle in self.RB4_cps_param_handles.items():
+            RB4_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.bh_steps)
+
+
+        # flatten the logical sequence into plain integer arrays (profile numbers)
+        seq_rb1ab = []
+        seq_rb2 = []
+        seq_rb4 = []
+        seq_dur_mu = []
+
+        for nreps, block in SEQUENCE_BLOCKS:
+            for _ in range(nreps):
+                for pulse_name in block:
+                    p = PULSES[pulse_name]
+
+                    # What profile each chip should be in per pulse
+                    seq_rb1ab.append(RB1AB_PROFILE[p.rb1ab])
+                    seq_rb2.append(RB2_PROFILE[p.rb2])
+                    seq_rb4.append(RB4_PROFILE[p.rb4])
+
+                    # How long the pulse will take
+                    src_kind, src_key = p.duration_src
+                    if src_kind == "rb2":
+                        seq_dur_mu.append(RB2_dur_mu[src_key])
+                    else:
+                        seq_dur_mu.append(RB4_dur_mu[src_key])
+
+        self.seq_rb1ab = seq_rb1ab
+        self.seq_rb2 = seq_rb2
+        self.seq_rb4 = seq_rb4
+        self.seq_dur_mu = seq_dur_mu
+        self.seq_len = len(seq_dur_mu)
+
+        self.op_time_mu = self._ceil8_mu(self.core.seconds_to_mu(self.OP_time.get()))
+
+
+    def _compute_full_scale_RAM_profiles(self):
         # Convention is that all RAM profiles are:
-        # off, on, [BH]
+        # off, on, [BH] in logical space.
 
         # Prepare pulse shape RAM for RB2 (radial -> Tukey pulse)
         
@@ -223,6 +435,7 @@ class UrukulRSCExample(Fragment):
         self.amp_logical_rb2 = [0.0,0.7] # Useful for direct switch square pulses
         
         tk = []
+        tk_scale_factor = self.RB2_amp_scale.get()
         for n in range(self.tukey_steps):
             x = n / (self.tukey_steps - 1)  # normalized position in [0, 1]
 
@@ -243,7 +456,7 @@ class UrukulRSCExample(Fragment):
                     # falling cosine taper
                     w = 0.5 * (1 + np.cos(np.pi * (2 * x / alpha - 2 / alpha + 1)))
 
-            tk.append(w)
+            tk.append(w*tk_scale_factor)
 
         self.amp_logical_rb2 += tk
         
@@ -260,10 +473,11 @@ class UrukulRSCExample(Fragment):
         
         twopi = 2*np.pi
         bh = []
+        bh_scale_factor = self.RB4_amp_scale.get()
         for n in range(self.bh_steps):
             x = n/(self.bh_steps-1)
             w = a0 - a1*np.cos(twopi*x) + a2*np.cos(2*twopi*x) - a3*np.cos(3*twopi*x)
-            bh.append(w)
+            bh.append(w*bh_scale_factor)
 
         self.amp_logical_rb4 += bh
         
@@ -271,22 +485,133 @@ class UrukulRSCExample(Fragment):
         self.amp_length_rb4 = len(self.amp_logical_rb4)
         self.amp_reversed_rb4 = list(reversed(self.amp_logical_rb4)) # Create array in expected order for chip (reversed)
 
+    def _compile_rb1ab_program(self):
+        items = sorted(RB1AB_PROFILE.items(), key=lambda kv: kv[1])
+
+        self.rb1ab_profiles = []
+        self.rb1a_freqs = []
+        self.rb1a_amps = []
+        self.rb1b_freqs = []
+        self.rb1b_amps = []
+
+        for key, profile in items:
+            self.rb1ab_profiles.append(profile)
+            self.rb1a_freqs.append(self.RB1A_frequency_param_handles[key].get())
+            self.rb1a_amps.append(self.RB1A_amp_param_handles[key].get())
+            self.rb1b_freqs.append(self.RB1B_frequency_param_handles[key].get())
+            self.rb1b_amps.append(self.RB1B_amp_param_handles[key].get())
+
+        self.rb1ab_profile_count = len(self.rb1ab_profiles)
+
+    def _compile_ram_program(self, profile_map, layout_map, cps_handles, n_steps):
+        profiles, starts, ends, steps, modes = [], [], [], [], []
+        shape_start = 2
+        shape_end = 2 + n_steps - 1
+
+        for key, profile in sorted(profile_map.items(), key=lambda kv: kv[1]):
+            layout = layout_map[key]
+            if layout.region == "off":
+                start, end, step = 0, 0, 1
+            elif layout.region == "on":
+                start, end, step = 1, 1, 1
+            elif layout.region == "shape":
+                start, end, step = shape_start, shape_end, cps_handles[key].get()
+            else:
+                raise ValueError(f"Unknown RAM region {layout.region!r}")
+
+            profiles.append(profile)
+            starts.append(start)
+            ends.append(end)
+            steps.append(step)
+            modes.append(layout.mode)
+
+        return profiles, starts, ends, steps, modes
+
+    def host_setup(self):
+        super().host_setup()
+
+        # Lazy prepare (could be in prepare instead)
+        self._compute_full_scale_RAM_profiles()
+        self._compile_sequence()
+        self._compile_rb1ab_program()
+
+
+        (self.rb2_ram_profiles,
+        self.rb2_ram_starts,
+        self.rb2_ram_ends,
+        self.rb2_ram_steps,
+        self.rb2_ram_modes) = self._compile_ram_program(
+            RB2_PROFILE, RB2_RAM_LAYOUT, self.RB2_cps_param_handles, self.tukey_steps
+        )
+        self.rb2_ram_count = len(self.rb2_ram_profiles)
+
+        (self.rb4_ram_profiles,
+        self.rb4_ram_starts,
+        self.rb4_ram_ends,
+        self.rb4_ram_steps,
+        self.rb4_ram_modes) = self._compile_ram_program(
+            RB4_PROFILE, RB4_RAM_LAYOUT, self.RB4_cps_param_handles, self.bh_steps
+        )
+        self.rb4_ram_count = len(self.rb4_ram_profiles)
+
     @kernel
-    def init_dds(self, dds):
-        dds.init()
-        dds.set_att(6.*dB)
-        dds.cfg_sw(False)
+    def configure_RB1AB_single_tone_mode(self):
+        delay(4*us)
+        self.dds_ch_RB1A.set_profile(0)
+        self.dds_ch_RB1B.set_profile(0)
+        delay(4*us)
+
+        for i in range(self.rb1ab_profile_count):
+            profile = self.rb1ab_profiles[i]
+
+            self.dds_ch_RB1A.set(
+                frequency=self.rb1a_freqs[i],
+                phase=0.0,
+                amplitude=self.rb1a_amps[i],
+                profile=profile
+            )
+
+            self.dds_ch_RB1B.set(
+                frequency=self.rb1b_freqs[i],
+                phase=0.0,
+                amplitude=self.rb1b_amps[i],
+                profile=profile
+            )
+
+    @kernel
+    def _apply_rb2_ram_program(self, rb2_dds):
+        for i in range(self.rb2_ram_count):
+            rb2_dds.set_profile_ram(
+                start=self.rb2_ram_starts[i],
+                end=self.rb2_ram_ends[i],
+                step=self.rb2_ram_steps[i],
+                profile=self.rb2_ram_profiles[i],
+                mode=self.rb2_ram_modes[i]
+            )
+            rb2_dds.io_update.pulse_mu(8)
+
+    @kernel
+    def _apply_rb4_ram_program(self, rb4_dds):
+        for i in range(self.rb4_ram_count):
+            rb4_dds.set_profile_ram(
+                start=self.rb4_ram_starts[i],
+                end=self.rb4_ram_ends[i],
+                step=self.rb4_ram_steps[i],
+                profile=self.rb4_ram_profiles[i],
+                mode=self.rb4_ram_modes[i]
+            )
+            rb4_dds.io_update.pulse_mu(8)
+
 
     @kernel
     def configure_RB24_ram_mode(self, rb2_dds, rb4_dds):
         ##### RB2
-
+        # Disable ram mode while setting up
         rb2_dds.set_cfr1(ram_enable=0) # Control Function Register 1
         rb2_dds.io_update.pulse_mu(8)
 
         # 1) Loader profile (also the initial profile we start in)
         # This loads all the RAM at once 
-
         rb2_dds.amplitude_to_ram(self.amp_reversed_rb2, self.asf_ram_rb2) # Reverse the logical list to get nice indices
         self.core.break_realtime()
 
@@ -311,22 +636,9 @@ class UrukulRSCExample(Fragment):
         # so smallest DeltaT is 4ns for a step of 1
         
         # 3) Set profiles
-        for profile, start, end, step, mode in [
-            (1,2,2+self.tukey_steps-1, RB2_STEPS[1], RAM_MODE_RAMPUP),
-            (2,2,2+self.tukey_steps-1, RB2_STEPS[2], RAM_MODE_RAMPUP),
-            (3,2,2+self.tukey_steps-1, RB2_STEPS[3], RAM_MODE_RAMPUP),
-            (4,2,2+self.tukey_steps-1, RB2_STEPS[4], RAM_MODE_RAMPUP),
-            (5,1,1,                     1, RAM_MODE_DIRECTSWITCH), # On
-            (0,0,0,                     1, RAM_MODE_DIRECTSWITCH)  # Off
-            ]:
-            rb2_dds.set_profile_ram(
-                start=start, end=end,
-                step=step, profile=profile, mode=mode
-            )
-            rb2_dds.io_update.pulse_mu(8)
+        self._apply_rb2_ram_program(rb2_dds)
         
-        
-        rb2_dds.set(frequency=0.5*MHz, ram_destination=RAM_DEST_ASF)   # Set what the frequency is, and what the RAM does (ASF)
+        rb2_dds.set(frequency=110*MHz, ram_destination=RAM_DEST_ASF)   # Set what the frequency is, and what the RAM does (ASF)
         rb2_dds.set_cfr1(ram_enable=1, ram_destination=RAM_DEST_ASF) # Enable RAM, Pass osk_enable=1 to set_cfr1() if it is not an amplitude RAM
         rb2_dds.io_update.pulse_mu(8) # Write to CPLD
 
@@ -338,7 +650,7 @@ class UrukulRSCExample(Fragment):
         # 1) Loader profile (also the initial profile we start in)
         # This loads all the RAM at once 
 
-        # 2) Load once
+        # 2) Program the whole RAM all at once using LOADER profile 
         rb4_dds.amplitude_to_ram(self.amp_reversed_rb4, self.asf_ram_rb4) # Reverse the logical list to get nice indices
         self.core.break_realtime()
         
@@ -355,45 +667,36 @@ class UrukulRSCExample(Fragment):
             # RAM upload on satelites is flakey for over ~400 points, so upload in blocks
             raise
         
-        # 3) Set profiles
-        for profile, start, end, step, mode in [
-            (1,2,2+self.bh_steps-1, RB4_STEPS[1],RAM_MODE_RAMPUP),
-            (2,2,2+self.bh_steps-1, RB4_STEPS[2],RAM_MODE_RAMPUP),
-            (3,2,2+self.bh_steps-1, RB4_STEPS[3],RAM_MODE_RAMPUP),
-            (4,2,2+self.bh_steps-1, RB4_STEPS[4],RAM_MODE_RAMPUP),
-            (5,2,2+self.bh_steps-1, RB4_STEPS[5],RAM_MODE_RAMPUP),
-            (6,2,2+self.bh_steps-1, RB4_STEPS[6],RAM_MODE_RAMPUP),
-            (7,2,2+self.bh_steps-1, RB4_STEPS[7],RAM_MODE_RAMPUP),
-            (0,0,0,                  1,          RAM_MODE_DIRECTSWITCH) # Off
-            ]:
-            rb4_dds.set_profile_ram(
-                start=start, end=end,
-                step=step, profile=profile, mode=mode
-            )
-            rb4_dds.io_update.pulse_mu(8)
+        # 3) Set profile control registers
+        self._apply_rb4_ram_program(rb4_dds)
         
         
-        rb4_dds.set(frequency=0.5*MHz, ram_destination=RAM_DEST_ASF) # Set what the frequency is, and what the RAM does (ASF)
+        rb4_dds.set(frequency=110*MHz, ram_destination=RAM_DEST_ASF) # Set what the frequency is, and what the RAM does (ASF)
         rb4_dds.set_cfr1(ram_enable=1, ram_destination=RAM_DEST_ASF) # Enable RAM, Pass osk_enable=1 to set_cfr1() if it is not an amplitude RAM
         rb4_dds.io_update.pulse_mu(8) # Write to CPLD
 
-    @kernel
-    def configure_RB1AB_single_tone_mode(self, dds):
-        delay(20*us)
-        dds.set_profile(0) # Set profile pins to default
-        delay(20*us)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[1], profile=1)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[2], profile=2)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[3], profile=3)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[4], profile=4)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[5], profile=5)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[6], profile=6)
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=RB1B_AMPS[7], profile=7)
 
-        dds.set(frequency=0.5*MHz, phase=0.0, amplitude=0.0, profile=0) # Off
-        delay(20*us) #Give some time for io update after
-        dds.set_profile(0) # Set profile pins to default
-        delay(20*us)
+
+    @kernel
+    def configure_OP_beams(self):
+
+        self.dds_ch_rb_op12.set_profile(0)
+        self.dds_ch_cs_op34.set_profile(0)
+        self.dds_ch_rb_op22.set_profile(0)
+        self.dds_ch_cs_op44.set_profile(0)
+
+        # Profile 0 is off
+        self.dds_ch_rb_op12.set(frequency=100*MHz, phase=0.0, amplitude=0.0, profile=0)
+        self.dds_ch_cs_op34.set(frequency=100*MHz, phase=0.0, amplitude=0.0, profile=0)
+        self.dds_ch_rb_op22.set(frequency=180*MHz, phase=0.0, amplitude=0.0, profile=0)
+        self.dds_ch_cs_op44.set(frequency=180*MHz, phase=0.0, amplitude=0.0, profile=0)
+
+        # Profile 1 is on
+        self.dds_ch_rb_op12.set(frequency=self.OP12_frequency.get(), phase=0.0, amplitude=self.OP12_amp.get(), profile=1)
+        self.dds_ch_cs_op34.set(frequency=self.OP34_frequency.get(), phase=0.0, amplitude=self.OP34_amp.get(), profile=1)
+        self.dds_ch_rb_op22.set(frequency=self.OP22_frequency.get(), phase=0.0, amplitude=self.OP22_amp.get(), profile=1)
+        self.dds_ch_cs_op44.set(frequency=self.OP44_frequency.get(), phase=0.0, amplitude=self.OP44_amp.get(), profile=1)
+
 
     @kernel
     def device_setup(self):
@@ -403,11 +706,30 @@ class UrukulRSCExample(Fragment):
                 
         # Setup DDS RAM mode, upload RAM, and set profile registers
         self.configure_RB24_ram_mode(self.dds_ch_RB2,self.dds_ch_RB4)
-        delay(10*us)
-        self.configure_RB1AB_single_tone_mode(self.dds_ch_RB1B)
 
         self.core.break_realtime()
 
+    @kernel
+    def play_one_pulse(self, rb1ab_prof: int, rb2_prof: int, rb4_prof: int, dur_mu: int, op_mu: int):
+        if rb1ab_prof != 0:
+            self.dds_ch_RB1A.set_profile(rb1ab_prof)
+            self.dds_ch_RB1B.set_profile(rb1ab_prof)
+        if rb2_prof != 0:
+            self.dds_ch_RB2.set_profile(rb2_prof)
+        if rb4_prof != 0:
+            self.dds_ch_RB4.set_profile(rb4_prof)
+
+        delay_mu(dur_mu)
+
+        if rb1ab_prof != 0:
+            self.dds_ch_RB1A.set_profile(0)
+            self.dds_ch_RB1B.set_profile(0)
+        if rb2_prof != 0:
+            self.dds_ch_RB2.set_profile(0)
+        if rb4_prof != 0:
+            self.dds_ch_RB4.set_profile(0)
+
+        delay_mu(op_mu) 
     
     @kernel
     def play_rsc_pulses(self):
@@ -430,197 +752,31 @@ class UrukulRSCExample(Fragment):
         # Which *then* changes the profile pins internally.
 
         # Configure OP beams
+        self.configure_OP_beams()
 
-
-        self.dds_ch_RB1B.cfg_sw(True) # Enable RF switch
-        self.dds_ch_RB2.cfg_sw(True) # Enable RF switch
-        self.dds_ch_RB4.cfg_sw(True) # Enable RF switch
-
-        # Set RB1s first as the SPI delay of ~0.86us will give them a natural buffer
-        for i in range(6): # Repeat 6 times
-            # Axial n-4
-            self.dds_ch_RB1B.set_profile(6)
-            self.dds_ch_RB4.set_profile(6)
-            delay(RB4_PROF_TIMES_US[6]*us) # This is the time for the pulse to play
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME) # This is the time for OP
-            
-            # Radial x
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(1)
-            delay(RB2_PROF_TIMES_US[1]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-            # Axial n-4
-            self.dds_ch_RB1B.set_profile(6)
-            self.dds_ch_RB4.set_profile(6)
-            delay(RB4_PROF_TIMES_US[6]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-            
-            # Radial y
-            self.dds_ch_RB1B.set_profile(1)
-            self.dds_ch_RB2.set_profile(4)
-            delay(RB2_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-
-        for i in range(10): # Repeat 10 times
-            # Axial n-3
-            self.dds_ch_RB1B.set_profile(5)
-            self.dds_ch_RB4.set_profile(5)
-            delay(RB4_PROF_TIMES_US[5]*us) # This is the time for the pulse to play
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME) # This is the time for OP
-            
-            # Radial x
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(1)
-            delay(RB2_PROF_TIMES_US[1]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-            # Axial n-3
-            self.dds_ch_RB1B.set_profile(5)
-            self.dds_ch_RB4.set_profile(5)
-            delay(RB4_PROF_TIMES_US[5]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-            
-            # Radial y
-            self.dds_ch_RB1B.set_profile(1)
-            self.dds_ch_RB2.set_profile(4)
-            delay(RB2_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
+        # Configure RB1A/B
+        self.configure_RB1AB_single_tone_mode()
         
-        for i in range(10): # Repeat 10 times
-            # Axial n-2
-            self.dds_ch_RB1B.set_profile(4)
-            self.dds_ch_RB4.set_profile(4)
-            delay(RB4_PROF_TIMES_US[4]*us) # This is the time for the pulse to play
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME) # This is the time for OP
-            
-            # Radial x
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(1)
-            delay(RB2_PROF_TIMES_US[1]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-            # Axial n-2
-            self.dds_ch_RB1B.set_profile(4)
-            self.dds_ch_RB4.set_profile(4)
-            delay(RB4_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-            
-            # Radial y
-            self.dds_ch_RB1B.set_profile(1)
-            self.dds_ch_RB2.set_profile(4)
-            delay(RB2_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
+        # Start pulse sequence
+
+        self.dds_ch_RB1A.cfg_sw(True)
+        self.dds_ch_RB1B.cfg_sw(True)
+        self.dds_ch_RB2.cfg_sw(True) 
+        self.dds_ch_RB4.cfg_sw(True) 
         
-        for i in range(15): # Repeat 15 times
-            # Axial n-2
-            self.dds_ch_RB1B.set_profile(4)
-            self.dds_ch_RB4.set_profile(4)
-            delay(RB4_PROF_TIMES_US[4]*us) # This is the time for the pulse to play
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME) # This is the time for OP
-            
-            # Radial x (longer)
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(2)
-            delay(RB2_PROF_TIMES_US[2]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-            # Axial n-1
-            self.dds_ch_RB1B.set_profile(3)
-            self.dds_ch_RB4.set_profile(3)
-            delay(RB4_PROF_TIMES_US[3]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-            
-            # Radial y
-            self.dds_ch_RB1B.set_profile(1)
-            self.dds_ch_RB2.set_profile(4)
-            delay(RB2_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-
-            # Axial n-1 (weird)
-            self.dds_ch_RB1B.set_profile(3)
-            self.dds_ch_RB4.set_profile(2)
-            delay(RB4_PROF_TIMES_US[2]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-
-            # Radial x
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(1)
-            delay(RB2_PROF_TIMES_US[1]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-
-            # Axial n-2
-            self.dds_ch_RB1B.set_profile(4)
-            self.dds_ch_RB4.set_profile(4)
-            delay(RB4_PROF_TIMES_US[4]*us) 
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-
-            # Radial x (longer)
-            self.dds_ch_RB1B.set_profile(2)
-            self.dds_ch_RB2.set_profile(2)
-            delay(RB2_PROF_TIMES_US[2]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-            # Axial n-1
-            self.dds_ch_RB1B.set_profile(3)
-            self.dds_ch_RB4.set_profile(3)
-            delay(RB4_PROF_TIMES_US[3]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB4.set_profile(0)
-            delay(OP_TIME)
-
-            # Radial y
-            self.dds_ch_RB1B.set_profile(1)
-            self.dds_ch_RB2.set_profile(4)
-            delay(RB2_PROF_TIMES_US[4]*us)
-            self.dds_ch_RB1B.set_profile(0)
-            self.dds_ch_RB2.set_profile(0)
-            delay(OP_TIME)
-            
-
-        self.dds_ch_RB1B.cfg_sw(False) # Enable RF switch
-        self.dds_ch_RB2.cfg_sw(False) # Enable RF switch
-        self.dds_ch_RB4.cfg_sw(False) # Enable RF switch
+        for i in range(self.seq_len):
+            self.play_one_pulse(
+                self.seq_rb1ab[i],
+                self.seq_rb2[i],
+                self.seq_rb4[i],
+                self.seq_dur_mu[i],
+                self.op_time_mu
+            )
+        
+        self.dds_ch_RB1A.cfg_sw(False)
+        self.dds_ch_RB1B.cfg_sw(False) 
+        self.dds_ch_RB2.cfg_sw(False) 
+        self.dds_ch_RB4.cfg_sw(False) 
 
 
 class UrukulRSCTestExperiment(ExpFragment):
