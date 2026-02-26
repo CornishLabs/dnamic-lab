@@ -652,6 +652,7 @@ class UrukulRSCExample(Fragment):
         # This loads all the RAM at once 
 
         # 2) Program the whole RAM all at once using LOADER profile 
+        self.core.break_realtime()
         rb4_dds.amplitude_to_ram(self.amp_reversed_rb4, self.asf_ram_rb4) # Reverse the logical list to get nice indices
         self.core.break_realtime()
         
@@ -701,6 +702,7 @@ class UrukulRSCExample(Fragment):
 
     @kernel
     def device_setup(self):
+        self.core.break_realtime()
         self.device_setup_subfragments() # Should be NO-OP for this fragment
 
         # TODO: Make this do nothing if no params changed
@@ -708,10 +710,9 @@ class UrukulRSCExample(Fragment):
         # Setup DDS RAM mode, upload RAM, and set profile registers
         self.configure_RB24_ram_mode(self.dds_ch_RB2,self.dds_ch_RB4)
 
-        self.core.break_realtime()
 
     @kernel
-    def play_one_pulse(self, rb1ab_prof: int, rb2_prof: int, rb4_prof: int, dur_mu: int, op_mu: int):
+    def play_one_pulse(self, rb1ab_prof, rb2_prof, rb4_prof, dur_mu, op_mu):
         if rb1ab_prof != 0:
             self.dds_ch_RB1A.set_profile(rb1ab_prof)
             self.dds_ch_RB1B.set_profile(rb1ab_prof)
@@ -756,10 +757,11 @@ class UrukulRSCExample(Fragment):
         self.configure_OP_beams()
 
         # Configure RB1A/B
+        self.core.break_realtime()
         self.configure_RB1AB_single_tone_mode()
         
         # Start pulse sequence
-
+        self.core.break_realtime()
         self.dds_ch_RB1A.cfg_sw(True)
         self.dds_ch_RB1B.cfg_sw(True)
         self.dds_ch_RB2.cfg_sw(True) 
@@ -781,17 +783,20 @@ class UrukulRSCExample(Fragment):
 
 
 class UrukulRSCTest(ExpFragment):
-    # TODO: Make a test class that calls the initialisation of urukul channels, then runs
-    # the fragment defined above.
+
     def build_fragment(self):
+        self.setattr_device("core")
+        self.core: Core
         self.setattr_fragment("initialiser", InitialiseHardware)
         self.initialiser: InitialiseHardware
         self.setattr_fragment("rsc", UrukulRSCExample)
         self.rsc: UrukulRSCExample
 
+    @kernel
     def run_once(self):
-        self.initialiser.safe_off_initial_state()
-        delay(10*us)
+        self.core.break_realtime()
+        self.initialiser.safe_off_standalone()
+        self.core.break_realtime()    
         self.rsc.play_rsc_pulses()
 
 UrukulRSCTestExperiment = make_fragment_scan_exp(UrukulRSCTest)

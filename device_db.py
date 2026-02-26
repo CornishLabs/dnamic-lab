@@ -29,4 +29,33 @@ custom_controllers = {
 }
 
 # Configuration of sim is set in .dax
-device_db = (ddb_gen | aliases | custom_controllers)
+device_db_to_mod = ddb_gen 
+
+for device_name, device_config in ddb_gen.items():
+    try:
+        # Patch any CPLD devices which don't have "io_update_device" devices to be
+        # an alternative class (with the same features)
+        if (
+            device_config["class"] == "CPLD"
+            and device_config["module"] == "artiq.coredevice.urukul"
+        ):
+            if not "io_update_device" in device_config["arguments"]:
+                print("Patching %s to be a PyAION CPLD_alt", device_name)
+                device_config["class"] = "CPLD_alt"
+                device_config["module"] = "repository.lib.suservo_workaround"
+
+        # Patch any AD9910 devices which don't have "sw_device" devices to be
+        # an alternative class (with the same features)
+        if (
+            device_config["class"] == "AD9910"
+            and device_config["module"] == "artiq.coredevice.ad9910"
+        ):
+            if not "sw_device" in device_config["arguments"]:
+                print("Patching %s to be a PyAION AD9910_alt", device_name)
+                device_config["class"] = "AD9910_alt"
+                device_config["module"] = "repository.lib.suservo_workaround"
+
+    except KeyError:
+        pass
+
+device_db = (device_db_to_mod | aliases | custom_controllers) # (modified)
