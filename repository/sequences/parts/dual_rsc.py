@@ -14,8 +14,10 @@ from artiq.coredevice.core import Core
 from artiq.coredevice.urukul import CPLD
 from artiq.coredevice.ttl import TTLOut
 
-from ndscan.experiment import Fragment, ExpFragment
+from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
 from ndscan.experiment.parameters import IntParam, FloatParam
+
+from repository.sequences.parts.initialiser import InitialiseHardware
 
 """
       z || RB4 (antiparallel)
@@ -369,8 +371,6 @@ class UrukulRSCExample(Fragment):
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4", "dds_ch_rb_op22", "dds_ch_rb_op12", "dds_ch_cs_op44", "dds_ch_cs_op34"}
 
-
-
     def _ceil8_mu(self, mu: int) -> int:
         return (mu + 7) & ~7
 
@@ -531,10 +531,9 @@ class UrukulRSCExample(Fragment):
         super().host_setup()
 
         # Lazy prepare (could be in prepare instead)
-        self._compute_full_scale_RAM_profiles()
-        self._compile_sequence()
         self._compile_rb1ab_program()
 
+        self._compute_full_scale_RAM_profiles()
 
         (self.rb2_ram_profiles,
         self.rb2_ram_starts,
@@ -553,6 +552,8 @@ class UrukulRSCExample(Fragment):
             RB4_PROFILE, RB4_RAM_LAYOUT, self.RB4_cps_param_handles, self.bh_steps
         )
         self.rb4_ram_count = len(self.rb4_ram_profiles)
+        
+        self._compile_sequence()
 
     @kernel
     def configure_RB1AB_single_tone_mode(self):
@@ -738,9 +739,9 @@ class UrukulRSCExample(Fragment):
         - DDS CPLD, DDS Chs (AD9910s) are initialised, and that they have valid SYNC_CLK w.r.t RTIO
             (see https://forum.m-labs.hk/d/1221-urukul-pr9-set-profile-non-deterministic-intermediate-hamming-path-activation)
         - Profile settings (Profile settings, single tone/ram mode setup) are valid NOW. 
-            This fragment sets them in device_setup(). But this means caution must be 
-            applied if this method wanted to be called multiple times with different settings
-            in each sequence, as the last fragment set in build_fragment() will take precedence.
+            This fragment sets them in device_setup() for RB2/4. But this means caution must be 
+            applied if this method wanted to be called multiple times with different settings for
+            RB2/4 in each sequence, as the last fragment set in build_fragment() will take precedence.
         """
 
         # Profile playback
@@ -779,8 +780,18 @@ class UrukulRSCExample(Fragment):
         self.dds_ch_RB4.cfg_sw(False) 
 
 
-class UrukulRSCTestExperiment(ExpFragment):
+class UrukulRSCTest(ExpFragment):
     # TODO: Make a test class that calls the initialisation of urukul channels, then runs
     # the fragment defined above.
-    def __init__(self):
-        pass
+    def build_fragment(self):
+        self.setattr_fragment("initialiser", InitialiseHardware)
+        self.initialiser: InitialiseHardware
+        self.setattr_fragment("rsc", UrukulRSCExample)
+        self.rsc: UrukulRSCExample
+
+    def run_once(self):
+        self.initialiser.safe_off_initial_state()
+        delay(10*us)
+        self.rsc.play_rsc_pulses()
+
+UrukulRSCTestExperiment = make_fragment_scan_exp(UrukulRSCTest)
