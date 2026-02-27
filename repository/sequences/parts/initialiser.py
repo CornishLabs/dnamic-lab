@@ -10,12 +10,14 @@ from artiq.coredevice.zotino import Zotino
 from artiq.coredevice.suservo import Channel, SUServo
 from artiq.coredevice.sampler import Sampler
 
+from artiq.experiment import EnvExperiment
+
 # artiq
 from artiq.language.units import MHz, dB, us, V
 from artiq.language.core import delay, kernel, delay_mu
 
 # ndscan concepts
-from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
+from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp, create_and_run_fragment_once
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ def is_ttl_name(s: str) -> bool:
     return s.startswith("ttl") and len(s) > 3 and len(s) < 6 and s[3:].isdigit()
 
 
-class InitialiseHardware(Fragment):
+class InitialiseHardware(ExpFragment):
     """
     Discover and initialise hardware once per scan run.
 
@@ -50,7 +52,6 @@ class InitialiseHardware(Fragment):
         self.kernel_invariants = kernel_invariants | {
             "standalone_urukul_cplds",
             "standalone_ad9910s",
-            "standalone_sw_ad9910s",
             "suservos",
             "suservo_channels",
             "zotinos",
@@ -67,7 +68,7 @@ class InitialiseHardware(Fragment):
 
         self._discover_devices()
 
-        print(
+        logger.info(
             "Init: %d standalone CPLDs, %d standalone AD9910, %d SUServo, %d SUServo channels, %d Zotino, %d Samplers, %d TTLs",
             len(self.standalone_urukul_cplds),
             len(self.standalone_ad9910s),
@@ -184,11 +185,14 @@ class InitialiseHardware(Fragment):
         self.core.break_realtime()
 
         # SUServo.init() internally touches its own CPLDs and DDSes.
+        # These have a different SyncDelaySeed class to the normal delay seeds,
+        # so this needs to be it's own kernel
+
         for suservo in self.suservos:
             suservo.init()
 
     @kernel
-    def safe_off_standalone(self):
+    def safe_off(self):
         for ttl in self.ttls:
             ttl.off()
             delay_mu(8)
@@ -203,8 +207,6 @@ class InitialiseHardware(Fragment):
         for zotino in self.zotinos:
             zotino.set_dac([0.0] * 32)
 
-    @kernel
-    def safe_off_suservo(self):
         self.core.break_realtime()
 
         # Safest route before set_y(): stop servo iterations first.
@@ -218,19 +220,13 @@ class InitialiseHardware(Fragment):
 
         for channel in self.suservo_channels:
             channel.set_y(profile=0, y=0.0)
-
-
-class SetSafeState(ExpFragment):
-
-    def build_fragment(self):
-        self.setattr_device("core")
-        self.core: Core
-        self.setattr_fragment("initialiser", InitialiseHardware)
-        self.initialiser: InitialiseHardware
+    
     @kernel
     def run_once(self):
         self.core.break_realtime()
-        self.initialiser.safe_off_standalone()
-        self.core.break_realtime()    
+        self.safe_off()
 
-SetSafeStateExperiment = make_fragment_scan_exp(SetSafeState)
+
+class SetSafeStateExperiment(EnvExperiment):
+    def run(self):
+        create_and_run_fragment_once(self, InitialiseHardware)

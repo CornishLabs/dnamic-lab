@@ -28,6 +28,7 @@
           python-env
           artiq-lab-tmux
           pkgs.gtkwave
+          pkgs.libcanberra-gtk3
         ];
       shellHook = ''
         if [ -z "$SCRATCH_DIR" ]; then
