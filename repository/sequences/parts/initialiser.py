@@ -15,7 +15,7 @@ from artiq.language.units import MHz, dB, us, V
 from artiq.language.core import delay, kernel, delay_mu
 
 # ndscan concepts
-from ndscan.experiment import Fragment
+from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
 
 logger = logging.getLogger(__name__)
 
@@ -197,12 +197,11 @@ class InitialiseHardware(Fragment):
             dds.sw.off()
             dds.set_profile(0)
             delay(2*us)
-            # dds.set_att(0 * dB)
-            # dds.set(10 * MHz, amplitude=0.0, profile=0)
-            # delay_mu(16)
+            dds.set_att(0 * dB)
+            delay(2*us)
 
-        # for zotino in self.zotinos:
-        #     zotino.set_dac([0.0] * 32)
+        for zotino in self.zotinos:
+            zotino.set_dac([0.0] * 32)
 
     @kernel
     def safe_off_suservo(self):
@@ -221,107 +220,17 @@ class InitialiseHardware(Fragment):
             channel.set_y(profile=0, y=0.0)
 
 
+class SetSafeState(ExpFragment):
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""
     def build_fragment(self):
         self.setattr_device("core")
         self.core: Core
-
-        self._did_rtio_init = False
-
-        kernel_invariants = getattr(self, "kernel_invariants", set())
-        self.kernel_invariants = kernel_invariants | {
-            "standalone_urukul_cplds",
-            "standalone_ad9910s",
-            "standalone_sw_ad9910s",
-            "suservos",
-            "suservo_channels",
-            "zotinos",
-            "samplers",
-            "ttls",
-        }
-
-    def host_setup(self):
-        super().host_setup()
-
-        if self._did_rtio_init:
-            return
-        self._did_rtio_init = True
-
-
-        logger.info("Init: %d CPLDs, %d AD9910, %d SUServo, %d Zotino, %d Samplers",
-                    len(self.urukul_cplds), len(self.ad9910s),
-                    len(self.suservos), len(self.zotinos), len(self.samplers))
-
-        # Run the actual init once on the core
-        self.rtio_init_all()
-
+        self.setattr_fragment("initialiser", InitialiseHardware)
+        self.initialiser: InitialiseHardware
     @kernel
-    def rtio_init_all(self):
+    def run_once(self):
         self.core.break_realtime()
+        self.initialiser.safe_off_standalone()
+        self.core.break_realtime()    
 
-        # Initialise CPLDs of the non-suservo ad9910 chips first.
-        #  Resets the DDS I/O interface.
-        for cpld in self.urukul_cplds:
-            cpld.init()
-
-        # Then DDS channels
-        for dds in self.ad9910s:
-            dds.init()
-
-        # SUServo devices
-        # Initializes the servo, Sampler and both Urukuls (and their cplds).
-        # Leaves the servo disabled (see :meth:`set_config`), resets and
-        # configures all DDS.
-        for suservo in self.suservos:
-            suservo.init()
-
-        # DACs
-        # Configures the SPI bus, drives LDAC and CLR high, programmes
-        # the offset DACs, and enables overtemperature shutdown.
-        for zotino in self.zotinos:
-            zotino.init()
-
-        # Samplers (Doesn't include SUServo samplers)
-        # Initialize the device. Sets up SPI channels.
-        for sampler in self.samplers:
-            sampler.init()
-    
-    @kernel
-    def safe_off_initial_state(self):
-        
-        for ttl in self.ttls:
-            ttl.off()
-
-        for dds in self.ad9910s:
-            dds.sw.off()
-            dds.set_profile(0)
-            dds.set_att(0*dB)
-            dds.set(10*MHz, amplitude = 0.0, profile=0)
-
-        for zotino in self.zotinos:
-            zotino.set_dac([0.0]*32)
-        
-        for channel in self.suservo_channels:
-            channel.set(en_out=0, en_iir=0, profile=0)
-            delay(3*us)
-            channel.set_y(profile=0, y=0.)
-"""
+SetSafeStateExperiment = make_fragment_scan_exp(SetSafeState)

@@ -1,25 +1,7 @@
-import numpy as np
-from dataclasses import dataclass
-
-from artiq.language.units import MHz, dB, s, ms, us, V
-from artiq.language.core import delay, kernel, rpc, delay_mu
-from artiq.language.environment import EnvExperiment
-from artiq.coredevice.ad9910 import (
-    RAM_DEST_ASF,
-    RAM_MODE_DIRECTSWITCH,
-    RAM_MODE_RAMPUP,
-    AD9910,
-)
-from artiq.coredevice.core import Core
-from artiq.coredevice.urukul import CPLD
-from artiq.coredevice.ttl import TTLOut
-
-from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
-from ndscan.experiment.parameters import IntParam, FloatParam
-
-from repository.sequences.parts.initialiser import InitialiseHardware
-
 """
+This module contains fragments for performing dual species Raman Sideband Cooling (RSC) of atoms
+in tweezer traps.
+
       z || RB4 (antiparallel)
       
       |
@@ -44,6 +26,31 @@ TODO LIST:
 Setup RB1A/B in sequence rather than device setup
 Keep RB2/4 in device setup (and keep note)
 """
+
+import logging
+import numpy as np
+from dataclasses import dataclass
+
+from artiq.language.units import MHz, dB, s, ms, us, V
+from artiq.language.core import delay, kernel, rpc, delay_mu
+from artiq.language.environment import EnvExperiment
+from artiq.coredevice.ad9910 import (
+    RAM_DEST_ASF,
+    RAM_MODE_DIRECTSWITCH,
+    RAM_MODE_RAMPUP,
+    AD9910,
+)
+from artiq.coredevice.core import Core
+from artiq.coredevice.urukul import CPLD
+from artiq.coredevice.ttl import TTLOut
+
+from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
+from ndscan.experiment.parameters import IntParam, FloatParam
+
+from repository.sequences.parts.initialiser import InitialiseHardware
+
+logger = logging.getLogger(__name__)
+
 # ---------- logical pulse (multiple lasers come on) definitions ----------
 @dataclass(frozen=True)
 class PulseDef:
@@ -88,28 +95,29 @@ RB1AB_PROFILE = {
 } #Both RB1A and RB1B share this mapping.
 RB1A_RADIAL_AMP_DEFAULT = 0.735
 RB1A_AXIAL_AMP_DEFAULT = 0.11
+DEFAULT_SHIFT_MHZ = 95 # For testing
 RB1A_PROFILE_DEFAULT_INFO = {
     "off":    SingleToneProfData(0.0,120.0,0.0),
-    "R2":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.110,  0.0),
-    "R1":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.083,  0.0), 
-    "Zm1":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.057,  0.0),
-    "Zm2":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.075,  0.0),
-    "Zm3":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.094,  0.0),
-    "Zm4":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.112,  0.0),
-    "RbFlip": SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT,  99.991,  0.0),
+    "R2":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.110-DEFAULT_SHIFT_MHZ,  0.0),
+    "R1":     SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT, 100.083-DEFAULT_SHIFT_MHZ,  0.0), 
+    "Zm1":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.057-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm2":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.075-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm3":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.094-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm4":    SingleToneProfData(RB1A_AXIAL_AMP_DEFAULT,  100.112-DEFAULT_SHIFT_MHZ,  0.0),
+    "RbFlip": SingleToneProfData(RB1A_RADIAL_AMP_DEFAULT,  99.991-DEFAULT_SHIFT_MHZ,  0.0),
 }
 
 RB1B_RADIAL_AMP_DEFAULT = 0.49
 RB1B_AXIAL_AMP_DEFAULT = 0.183
 RB1B_PROFILE_DEFAULT_INFO = {
     "off":    SingleToneProfData(0.0,120.0,0.0),
-    "R2":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.051,  0.0),
-    "R1":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.023,  0.0), 
-    "Zm1":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.977,  0.0),
-    "Zm2":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.996,  0.0),
-    "Zm3":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.015,  0.0),
-    "Zm4":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.034,  0.0),
-    "RbFlip": SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT,  99.920,  0.0),
+    "R2":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.051-DEFAULT_SHIFT_MHZ,  0.0),
+    "R1":     SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT, 100.023-DEFAULT_SHIFT_MHZ,  0.0), 
+    "Zm1":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.977-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm2":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,   99.996-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm3":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.015-DEFAULT_SHIFT_MHZ,  0.0),
+    "Zm4":    SingleToneProfData(RB1B_AXIAL_AMP_DEFAULT,  100.034-DEFAULT_SHIFT_MHZ,  0.0),
+    "RbFlip": SingleToneProfData(RB1B_RADIAL_AMP_DEFAULT,  99.920-DEFAULT_SHIFT_MHZ,  0.0),
 }
 
 ### RB2 ###
@@ -222,6 +230,8 @@ class UrukulRSCExample(Fragment):
     def build_fragment(self):
         # ARGUMENTS
 
+        logger.info("Test0")
+
         ## OP settings
         self.setattr_param('OP_time',
                            FloatParam,
@@ -290,14 +300,15 @@ class UrukulRSCExample(Fragment):
             
             name = f"RB1A_{key}_frequency"
             param_handle = self.setattr_param(name, FloatParam,
-                 "Frequency played for profile goes to AOM",
-                default=default.frequency_mhz*MHz, min=1*MHz, max=5000*MHz)
+                 f"RB1A {key} AOM drive frequency",
+                default=default.frequency_mhz*MHz, min=1*MHz, max=200*MHz,
+                unit='MHz')
             self.RB1A_frequency_param_handles[key] = param_handle
             
             name = f"RB1A_{key}_amp"
             param_handle= self.setattr_param(name, 
                 FloatParam,
-                "Amp played for profile (0-1, relative to full scale)",
+                f"RB1A {key} Amp (0-1, relative to full scale)",
                 default=default.amplitude, min=0.0, max=1.0
             )
             self.RB1A_amp_param_handles[key] = param_handle
@@ -310,7 +321,8 @@ class UrukulRSCExample(Fragment):
             name = f"RB1B_{key}_frequency"
             param_handle = self.setattr_param(name, FloatParam,
                  "Frequency played for profile goes to AOM",
-                default=default.frequency_mhz*MHz, min=1*MHz, max=5000*MHz)
+                default=default.frequency_mhz*MHz, min=1*MHz, max=200*MHz,
+                unit='MHz')
             self.RB1B_frequency_param_handles[key] = param_handle
             
             name = f"RB1B_{key}_amp"
@@ -529,6 +541,8 @@ class UrukulRSCExample(Fragment):
 
     def host_setup(self):
         super().host_setup()
+
+        logger.info("Test1")
 
         # Lazy prepare (could be in prepare instead)
         self._compile_rb1ab_program()
@@ -798,5 +812,6 @@ class UrukulRSCTest(ExpFragment):
         self.initialiser.safe_off_standalone()
         self.core.break_realtime()    
         self.rsc.play_rsc_pulses()
+        logger.info("Test2")
 
 UrukulRSCTestExperiment = make_fragment_scan_exp(UrukulRSCTest)
