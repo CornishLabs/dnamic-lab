@@ -835,8 +835,8 @@ class UrukulRSCTest(ExpFragment):
 
     @kernel
     def run_once(self):
-        # self.core.break_realtime()
-        # self.initialiser.safe_off()
+        self.core.break_realtime()
+        self.initialiser.safe_off()
         self.core.break_realtime()    
         self.rsc.play_rsc_pulses()
         # # delay(5*ms)

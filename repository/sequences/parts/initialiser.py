@@ -81,7 +81,7 @@ class InitialiseHardware(ExpFragment):
 
         # Separate kernel entry points: do NOT wrap these in one umbrella kernel.
         self.rtio_init_standalone()
-        # self.rtio_init_suservos()
+        self.rtio_init_suservos()
 
     def _discover_devices(self):
         db = self.get_device_db()
