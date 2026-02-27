@@ -230,7 +230,7 @@ class UrukulRSCExample(Fragment):
     def build_fragment(self):
         # ARGUMENTS
 
-        logger.info("Test0")
+        # logger.info("Test0")
 
         ## OP settings
         self.setattr_param('OP_time',
@@ -542,7 +542,7 @@ class UrukulRSCExample(Fragment):
     def host_setup(self):
         super().host_setup()
 
-        logger.info("Test1")
+        # logger.info("Test1")
 
         # Lazy prepare (could be in prepare instead)
         self._compile_rb1ab_program()
@@ -619,7 +619,8 @@ class UrukulRSCExample(Fragment):
 
 
     @kernel
-    def configure_RB24_ram_mode(self, rb2_dds, rb4_dds):
+    def configure_RB24_ram_mode(self):
+        rb2_dds, rb4_dds = self.dds_ch_RB2,self.dds_ch_RB4
         ##### RB2
         # Disable ram mode while setting up
         rb2_dds.set_cfr1(ram_enable=0) # Control Function Register 1
@@ -696,10 +697,10 @@ class UrukulRSCExample(Fragment):
     @kernel
     def configure_OP_beams(self):
 
-        self.dds_ch_rb_op12.set_profile(0)
-        self.dds_ch_cs_op34.set_profile(0)
-        self.dds_ch_rb_op22.set_profile(0)
-        self.dds_ch_cs_op44.set_profile(0)
+        self.dds_ch_rb_op12.set_profile(1)
+        self.dds_ch_cs_op34.set_profile(1)
+        self.dds_ch_rb_op22.set_profile(1)
+        self.dds_ch_cs_op44.set_profile(1)
 
         # Profile 0 is off
         self.dds_ch_rb_op12.set(frequency=100*MHz, phase=0.0, amplitude=0.0, profile=0)
@@ -714,38 +715,63 @@ class UrukulRSCExample(Fragment):
         self.dds_ch_cs_op44.set(frequency=self.OP44_frequency.get(), phase=0.0, amplitude=self.OP44_amp.get(), profile=1)
 
 
+
     @kernel
     def device_setup(self):
         self.core.break_realtime()
-        self.device_setup_subfragments() # Should be NO-OP for this fragment
+        # self.device_setup_subfragments() # Should be NO-OP for this fragment
 
         # TODO: Make this do nothing if no params changed
                 
         # Setup DDS RAM mode, upload RAM, and set profile registers
-        self.configure_RB24_ram_mode(self.dds_ch_RB2,self.dds_ch_RB4)
+        delay(10*us)
+        self.configure_RB24_ram_mode()
+        delay(10*us)
 
 
     @kernel
     def play_one_pulse(self, rb1ab_prof, rb2_prof, rb4_prof, dur_mu, op_mu):
+        """
+        Plays a Raman pulse first, then an optical pumping pulse.
+        """
+
+        # Raman pulse
         if rb1ab_prof != 0:
+            self.dds_ch_RB1A.sw.on()
+            self.dds_ch_RB1B.sw.on()
             self.dds_ch_RB1A.set_profile(rb1ab_prof)
             self.dds_ch_RB1B.set_profile(rb1ab_prof)
         if rb2_prof != 0:
+            self.dds_ch_RB2.sw.on()
             self.dds_ch_RB2.set_profile(rb2_prof)
         if rb4_prof != 0:
+            self.dds_ch_RB4.sw.on()
             self.dds_ch_RB4.set_profile(rb4_prof)
 
         delay_mu(dur_mu)
 
         if rb1ab_prof != 0:
+            self.dds_ch_RB1A.sw.off()
+            self.dds_ch_RB1B.sw.off()
             self.dds_ch_RB1A.set_profile(0)
             self.dds_ch_RB1B.set_profile(0)
         if rb2_prof != 0:
+            self.dds_ch_RB2.sw.off()
             self.dds_ch_RB2.set_profile(0)
         if rb4_prof != 0:
+            self.dds_ch_RB4.sw.off()
             self.dds_ch_RB4.set_profile(0)
 
-        delay_mu(op_mu) 
+        # OP Pulse
+        self.dds_ch_cs_op34.sw.on()
+        self.dds_ch_cs_op44.sw.on()
+        self.dds_ch_rb_op12.sw.on()
+        self.dds_ch_rb_op22.sw.on()
+        delay_mu(op_mu)
+        self.dds_ch_cs_op34.sw.off()
+        self.dds_ch_cs_op44.sw.off()
+        self.dds_ch_rb_op12.sw.off()
+        self.dds_ch_rb_op22.sw.off()
     
     @kernel
     def play_rsc_pulses(self):
@@ -768,6 +794,7 @@ class UrukulRSCExample(Fragment):
         # Which *then* changes the profile pins internally.
 
         # Configure OP beams
+        self.core.break_realtime()
         self.configure_OP_beams()
 
         # Configure RB1A/B
@@ -776,10 +803,10 @@ class UrukulRSCExample(Fragment):
         
         # Start pulse sequence
         self.core.break_realtime()
-        self.dds_ch_RB1A.cfg_sw(True)
-        self.dds_ch_RB1B.cfg_sw(True)
-        self.dds_ch_RB2.cfg_sw(True) 
-        self.dds_ch_RB4.cfg_sw(True) 
+        self.dds_ch_RB1A.sw.on()
+        self.dds_ch_RB1B.sw.on()
+        self.dds_ch_RB2.sw.on() 
+        self.dds_ch_RB4.sw.on() 
         
         for i in range(self.seq_len):
             self.play_one_pulse(
@@ -790,10 +817,10 @@ class UrukulRSCExample(Fragment):
                 self.op_time_mu
             )
         
-        self.dds_ch_RB1A.cfg_sw(False)
-        self.dds_ch_RB1B.cfg_sw(False) 
-        self.dds_ch_RB2.cfg_sw(False) 
-        self.dds_ch_RB4.cfg_sw(False) 
+        self.dds_ch_RB1A.sw.off()
+        self.dds_ch_RB1B.sw.off() 
+        self.dds_ch_RB2.sw.off() 
+        self.dds_ch_RB4.sw.off() 
 
 
 class UrukulRSCTest(ExpFragment):
@@ -808,10 +835,15 @@ class UrukulRSCTest(ExpFragment):
 
     @kernel
     def run_once(self):
-        self.core.break_realtime()
-        self.initialiser.safe_off_standalone()
+        # self.core.break_realtime()
+        # self.initialiser.safe_off()
         self.core.break_realtime()    
         self.rsc.play_rsc_pulses()
-        logger.info("Test2")
+        # # delay(5*ms)
+        # self.rsc.configure_RB24_ram_mode()
+        # self.core.break_realtime()
+        # delay(5*ms)
+        # self.rsc.play_rsc_pulses()
+        # logger.info("Test2")
 
 UrukulRSCTestExperiment = make_fragment_scan_exp(UrukulRSCTest)

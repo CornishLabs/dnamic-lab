@@ -1,0 +1,79 @@
+diff --git a/artiq/coredevice/comm_analyzer.py b/artiq/coredevice/comm_analyzer.py
+index c49fed5e7..e1aa0fe4e 100644
+--- a/artiq/coredevice/comm_analyzer.py
++++ b/artiq/coredevice/comm_analyzer.py
+@@ -241,15 +241,48 @@ class VCDChannel:
+         self.set_value(value)
+ 
+ 
++def _vcd_timescale_from_ps(timescale_ps):
++    """
++    Convert a period in picoseconds into a legal VCD timescale and a
++    timestamp scaling factor.
++    """
++    rounded_ps = int(round(timescale_ps))
++    if rounded_ps <= 0:
++        raise ValueError("timescale must be positive")
++
++    trailing_zeros = len(str(rounded_ps)) - len(str(rounded_ps).rstrip("0"))
++    base_ps = 10 ** trailing_zeros
++    time_factor = rounded_ps // base_ps
++
++    for unit, unit_ps in (
++        ("s", 10**12),
++        ("ms", 10**9),
++        ("us", 10**6),
++        ("ns", 10**3),
++        ("ps", 1),
++    ):
++        if base_ps % unit_ps == 0:
++            value = base_ps // unit_ps
++            if value in (1, 10, 100):
++                return value, unit, time_factor
++
++    raise ValueError("cannot represent {} ps as a legal VCD timescale"
++                     .format(rounded_ps))
++
++
+ class VCDManager:
+     def __init__(self, fileobj):
+         self.out = fileobj
+         self.codes = vcd_codes()
+         self.current_time = None
+         self.start_time = 0
++        self.time_factor = 1
++        self._header_closed = False
+ 
+     def set_timescale_ps(self, timescale):
+-        self.out.write("$timescale {}ps $end\n".format(round(timescale)))
++        value, unit, time_factor = _vcd_timescale_from_ps(timescale)
++        self.time_factor = time_factor
++        self.out.write("$timescale {} {} $end\n".format(value, unit))
+ 
+     def get_channel(self, name, width, ty, precision=0, unit=""):
+         code = next(self.codes)
+@@ -263,8 +296,14 @@ class VCDManager:
+         yield
+         self.out.write("$upscope $end\n")
+ 
++    def _close_header(self):
++        if not self._header_closed:
++            self.out.write("$enddefinitions $end\n")
++            self._header_closed = True
++
+     def set_time(self, time):
+-        time -= self.start_time
++        self._close_header()
++        time = (time - self.start_time) * self.time_factor
+         if time != self.current_time:
+             self.out.write("#{}\n".format(time))
+             self.current_time = time
+@@ -566,7 +605,7 @@ class SPIMaster2Handler(WishboneHandler):
+                 self.channels["div"].set_value(
+                         "{:08b}".format(data >> 16 & 0xff))
+                 self.channels["length"].set_value(
+-                        "{:08b}".format(data >> 8 & 0x1f))
++                        "{:05b}".format(data >> 8 & 0x1f))
+                 self.channels["flags"].set_value(
+                         "{:08b}".format(data & 0xff))
+             elif address == 0:

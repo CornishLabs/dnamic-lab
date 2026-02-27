@@ -198,6 +198,7 @@ class InitialiseHardware(ExpFragment):
             delay_mu(8)
 
         for dds in self.standalone_ad9910s:
+            dds.cfg_sw(False) # Use ttl switches (faster)
             dds.sw.off()
             dds.set_profile(0)
             delay(2*us)
