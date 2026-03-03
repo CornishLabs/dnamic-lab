@@ -22,9 +22,6 @@ P2 010-----011 P3|
    |/        |/
 P0 000-------001 P1
 
-TODO LIST:
-Setup RB1A/B in sequence rather than device setup
-Keep RB2/4 in device setup (and keep note)
 """
 
 import logging
@@ -1097,11 +1094,5 @@ class UrukulRSCTest(ExpFragment):
     def run_once(self):
         self.core.break_realtime()    
         self.rsc.play_rsc_pulses()
-        # delay(1*ms)
-        # self.rsc.configure_RB24_ram_mode()
-        # self.core.break_realtime()
-        # delay(5*ms)
-        # self.rsc.play_rsc_pulses()
-        # logger.info("Test2")
 
 UrukulRSCTestExperiment = make_fragment_scan_exp(UrukulRSCTest)
