@@ -381,6 +381,41 @@ class UrukulRSCExample(Fragment):
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4", "dds_ch_rb_op22", "dds_ch_rb_op12", "dds_ch_cs_op44", "dds_ch_cs_op34"}
 
+        # Placeholders so all kernel-read attributes exist at compile time.
+        self.seq_rb1ab = []
+        self.seq_rb2 = []
+        self.seq_rb4 = []
+        self.seq_dur_mu = []
+        self.seq_len = 0
+        self.op_time_mu = 0
+
+        self.rb1ab_profiles = []
+        self.rb1a_freqs = []
+        self.rb1a_amps = []
+        self.rb1b_freqs = []
+        self.rb1b_amps = []
+        self.rb1ab_profile_count = 0
+
+        self.rb2_ram_profiles = []
+        self.rb2_ram_starts = []
+        self.rb2_ram_ends = []
+        self.rb2_ram_steps = []
+        self.rb2_ram_modes = []
+        self.rb2_ram_count = 0
+
+        self.rb4_ram_profiles = []
+        self.rb4_ram_starts = []
+        self.rb4_ram_ends = []
+        self.rb4_ram_steps = []
+        self.rb4_ram_modes = []
+        self.rb4_ram_count = 0
+
+        self.amp_reversed_rb2_to_upload = []
+        self.amp_reversed_rb4_to_upload = []
+
+        self.op_freqs = [100 * MHz, 100 * MHz, 180 * MHz, 180 * MHz]
+        self.op_amps = [0.0, 0.0, 0.0, 0.0]
+
     def _ceil8_mu(self, mu: int) -> int:
         """Round mu timestamp (up) to 8ns grid"""
         return (mu + 7) & ~7
@@ -415,7 +450,7 @@ class UrukulRSCExample(Fragment):
         self.seq_rb1ab = seq_rb1ab
         self.seq_rb2 = seq_rb2
         self.seq_rb4 = seq_rb4
-        self.seq_len = len(RB1AB_PROFILE)
+        self.seq_len = len(seq_rb1ab)
 
 
 
@@ -519,6 +554,15 @@ class UrukulRSCExample(Fragment):
 
         self._compile_sequence()
 
+        self._refresh_runtime_lists()
+
+    def _refresh_runtime_lists(self):
+        """
+        Compile all parameter-dependent values into plain lists/scalars for kernels.
+        """
+        self._calculate_pulse_times_mu()
+        self._compile_rb1ab_program()
+
         (self.rb2_ram_profiles,
         self.rb2_ram_starts,
         self.rb2_ram_ends,
@@ -536,6 +580,31 @@ class UrukulRSCExample(Fragment):
             RB4_PROFILE, RB4_RAM_LAYOUT, self.RB4_cps_param_handles, self.bh_steps
         )
         self.rb4_ram_count = len(self.rb4_ram_profiles)
+
+        rb2_scale = self.RB2_amp_scale.get()
+        rb4_scale = self.RB4_amp_scale.get()
+        # RAM is uploaded in reversed order; append [on, off] logical points.
+        self.amp_reversed_rb2_to_upload = [rb2_scale * x for x in self.amp_reversed_rb2] + [0.7, 0.0]
+        self.amp_reversed_rb4_to_upload = [rb4_scale * x for x in self.amp_reversed_rb4] + [0.7, 0.0]
+        self.amp_length_rb2 = len(self.amp_reversed_rb2_to_upload)
+        self.amp_length_rb4 = len(self.amp_reversed_rb4_to_upload)
+
+        self.op_freqs = [
+            self.OP12_frequency.get(),
+            self.OP34_frequency.get(),
+            self.OP22_frequency.get(),
+            self.OP44_frequency.get(),
+        ]
+        self.op_amps = [
+            self.OP12_amp.get(),
+            self.OP34_amp.get(),
+            self.OP22_amp.get(),
+            self.OP44_amp.get(),
+        ]
+
+    @rpc
+    def _refresh_runtime_lists_rpc(self):
+        self._refresh_runtime_lists()
 
     def _calculate_pulse_times_mu(self):
         """
@@ -646,14 +715,6 @@ class UrukulRSCExample(Fragment):
 
     @kernel
     def configure_RB24_ram_mode(self):
-        
-        # Finish making RAM profile with parameters
-        # 1) Scale current RAM
-        tk_scale_factor = self.RB2_amp_scale.get()
-        self.amp_reversed_rb2_to_upload = tk_scale_factor * self.amp_reversed_rb2
-        # 2) Add in single tone pulse
-        self.amp_reversed_rb2_to_upload[-2] = 0.7 # (Don't have a parameter handle for this yet)
-
         rb2_dds, rb4_dds = self.dds_ch_RB2,self.dds_ch_RB4
         ##### RB2
         # Disable ram mode while setting up
@@ -694,14 +755,6 @@ class UrukulRSCExample(Fragment):
 
         ##### RB4
 
-        # Finish making RAM profile with parameters
-        # 1) Scale current RAM
-        bh_scale_factor = self.RB4_amp_scale.get()
-        self.amp_reversed_rb4_to_upload = bh_scale_factor * self.amp_reversed_rb4
-        # 2) Add in single tone pulse
-        self.amp_reversed_rb4_to_upload[-2] = 0.7 # (Don't have a parameter handle for this yet)
-
-
         rb4_dds.set_cfr1(ram_enable=0) # Control Function Register 1
         rb4_dds.io_update.pulse_mu(8)
 
@@ -710,7 +763,7 @@ class UrukulRSCExample(Fragment):
 
         # 2) Program the whole RAM all at once using LOADER profile 
         self.core.break_realtime()
-        rb4_dds.amplitude_to_ram(self.amp_reversed_rb4, self.asf_ram_rb4) # Reverse the logical list to get nice indices
+        rb4_dds.amplitude_to_ram(self.amp_reversed_rb4_to_upload, self.asf_ram_rb4) # Reverse the logical list to get nice indices
         self.core.break_realtime()
         
         if self.amp_length_rb4 <= 420:
@@ -751,10 +804,10 @@ class UrukulRSCExample(Fragment):
         self.dds_ch_cs_op44.set(frequency=180*MHz, phase=0.0, amplitude=0.0, profile=0)
 
         # Profile 1 is on
-        self.dds_ch_rb_op12.set(frequency=self.OP12_frequency.get(), phase=0.0, amplitude=self.OP12_amp.get(), profile=1)
-        self.dds_ch_cs_op34.set(frequency=self.OP34_frequency.get(), phase=0.0, amplitude=self.OP34_amp.get(), profile=1)
-        self.dds_ch_rb_op22.set(frequency=self.OP22_frequency.get(), phase=0.0, amplitude=self.OP22_amp.get(), profile=1)
-        self.dds_ch_cs_op44.set(frequency=self.OP44_frequency.get(), phase=0.0, amplitude=self.OP44_amp.get(), profile=1)
+        self.dds_ch_rb_op12.set(frequency=self.op_freqs[0], phase=0.0, amplitude=self.op_amps[0], profile=1)
+        self.dds_ch_cs_op34.set(frequency=self.op_freqs[1], phase=0.0, amplitude=self.op_amps[1], profile=1)
+        self.dds_ch_rb_op22.set(frequency=self.op_freqs[2], phase=0.0, amplitude=self.op_amps[2], profile=1)
+        self.dds_ch_cs_op44.set(frequency=self.op_freqs[3], phase=0.0, amplitude=self.op_amps[3], profile=1)
 
 
 
@@ -762,12 +815,10 @@ class UrukulRSCExample(Fragment):
     def device_setup(self):
         self.device_setup_subfragments() # Should be NO-OP for this fragment
 
-        self.logger.warning("Device_setup ran")
+        self._refresh_runtime_lists_rpc()
         # TODO: Make this do nothing if no params changed
             
         # Setup DDS RAM mode, upload RAM, and set profile registers
-        self._calculate_pulse_times_mu()
-        self._compile_rb1ab_program()
         self.core.break_realtime()
         delay(50*us)
         self.configure_RB24_ram_mode()
