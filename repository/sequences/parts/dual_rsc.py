@@ -230,8 +230,6 @@ class UrukulRSCExample(Fragment):
     def build_fragment(self):
         # ARGUMENTS
 
-        # logger.info("Test0")
-
         ## OP settings
         self.setattr_param('OP_time',
                            FloatParam,
@@ -384,30 +382,25 @@ class UrukulRSCExample(Fragment):
         self.kernel_invariants = kernel_invariants | {"dds_cpld_rsc", "dds_ch_RB1A", "dds_ch_RB1B", "dds_ch_RB2", "dds_ch_RB4", "dds_ch_rb_op22", "dds_ch_rb_op12", "dds_ch_cs_op44", "dds_ch_cs_op34"}
 
     def _ceil8_mu(self, mu: int) -> int:
+        """Round mu timestamp (up) to 8ns grid"""
         return (mu + 7) & ~7
 
     def _ram_duration_mu(self, cycles_per_step: int, n_steps: int) -> int:
-        # 4 ns * cycles_per_step * n_steps
+        """Calculates how long a RAM profile will take to play through in mu, rounded up to fit on
+        an 8ns grid. (4 ns * cycles_per_step * n_steps)"""
         mu = self.core.seconds_to_mu(cycles_per_step * 4e-9 * n_steps)
         return self._ceil8_mu(mu)
     
     def _compile_sequence(self):
-        
-        # Work out how long the RAM pulses will take beforehand
-        RB2_dur_mu = {}
-        for key, param_handle in self.RB2_cps_param_handles.items():
-            RB2_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.tukey_steps)
-
-        RB4_dur_mu = {}
-        for key, param_handle in self.RB4_cps_param_handles.items():
-            RB4_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.bh_steps)
-
+        """
+        Serialises nice human readable dicts that define RSC sequence into lists that are kernel
+        compatible. This is done at once in host_setup (so for now, these can't be scanned)
+        """
 
         # flatten the logical sequence into plain integer arrays (profile numbers)
         seq_rb1ab = []
         seq_rb2 = []
         seq_rb4 = []
-        seq_dur_mu = []
 
         for nreps, block in SEQUENCE_BLOCKS:
             for _ in range(nreps):
@@ -419,35 +412,31 @@ class UrukulRSCExample(Fragment):
                     seq_rb2.append(RB2_PROFILE[p.rb2])
                     seq_rb4.append(RB4_PROFILE[p.rb4])
 
-                    # How long the pulse will take
-                    src_kind, src_key = p.duration_src
-                    if src_kind == "rb2":
-                        seq_dur_mu.append(RB2_dur_mu[src_key])
-                    else:
-                        seq_dur_mu.append(RB4_dur_mu[src_key])
-
         self.seq_rb1ab = seq_rb1ab
         self.seq_rb2 = seq_rb2
         self.seq_rb4 = seq_rb4
-        self.seq_dur_mu = seq_dur_mu
-        self.seq_len = len(seq_dur_mu)
+        self.seq_len = len(RB1AB_PROFILE)
 
-        self.op_time_mu = self._ceil8_mu(self.core.seconds_to_mu(self.OP_time.get()))
 
 
     def _compute_full_scale_RAM_profiles(self):
-        # Convention is that all RAM profiles are:
-        # off, on, [BH] in logical space.
+        """
+        Computes the RAM values to be put onto the card for the pulse shapes.
+        Convention is that all RAM profiles are:
+        [off, on, [BH]] in logical space.
+        These are then written to the variable e.g. `amp_reversed_rb2` which is the one that should
+        be fed through the upload pipeline to the card.
+        """
 
         # Prepare pulse shape RAM for RB2 (radial -> Tukey pulse)
         
         self.tukey_steps = 400
         alpha = 0.5  # Tukey shape: 0=rectangular, 1=Hann
 
-        self.amp_logical_rb2 = [0.0,0.7] # Useful for direct switch square pulses
+        # self.amp_logical_rb2 = [0.0,0.7] # Useful for direct switch square pulses
         
         tk = []
-        tk_scale_factor = self.RB2_amp_scale.get()
+        # tk_scale_factor = self.RB2_amp_scale.get()
         for n in range(self.tukey_steps):
             x = n / (self.tukey_steps - 1)  # normalized position in [0, 1]
 
@@ -468,52 +457,34 @@ class UrukulRSCExample(Fragment):
                     # falling cosine taper
                     w = 0.5 * (1 + np.cos(np.pi * (2 * x / alpha - 2 / alpha + 1)))
 
-            tk.append(w*tk_scale_factor)
+            tk.append(w)
 
-        self.amp_logical_rb2 += tk
+        self.amp_logical_rb2_full_scale = tk
         
-        self.asf_ram_rb2 = [0] * len(self.amp_logical_rb2) # Create array to put RAM words into
-        self.amp_length_rb2 = len(self.amp_logical_rb2)
-        self.amp_reversed_rb2 = list(reversed(self.amp_logical_rb2)) # Create array in expected order for chip (reversed)
+        self.asf_ram_rb2 = [0] * (len(self.amp_logical_rb2_full_scale)+2) # Create array to put RAM words into
+        self.amp_length_rb2 = len(self.amp_logical_rb2_full_scale)
+        self.amp_reversed_rb2 = list(reversed(self.amp_logical_rb2_full_scale)) # Create array in expected order for chip (reversed)
 
         # Prepare pulse shape RAM for RB4 (axial BH pulse)
         self.bh_steps = 400
 
         a0, a1, a2, a3 = 0.35875, 0.48829, 0.14128, 0.01168
         
-        self.amp_logical_rb4 = [0.0,0.7] # Useful for square pulses
+        # self.amp_logical_rb4_full_scale = [0.0,0.7] # Useful for square pulses
         
-        twopi = 2*np.pi
         bh = []
-        bh_scale_factor = self.RB4_amp_scale.get()
+        # bh_scale_factor = self.RB4_amp_scale.get()
         for n in range(self.bh_steps):
             x = n/(self.bh_steps-1)
-            w = a0 - a1*np.cos(twopi*x) + a2*np.cos(2*twopi*x) - a3*np.cos(3*twopi*x)
-            bh.append(w*bh_scale_factor)
+            w = a0 - a1*np.cos(2*np.pi*x) + a2*np.cos(2*2*np.pi*x) - a3*np.cos(3*2*np.pi*x)
+            bh.append(w)
 
-        self.amp_logical_rb4 += bh
+        self.amp_logical_rb4_full_scale = bh
         
-        self.asf_ram_rb4 = [0] * len(self.amp_logical_rb4) # Create array to put RAM words into
-        self.amp_length_rb4 = len(self.amp_logical_rb4)
-        self.amp_reversed_rb4 = list(reversed(self.amp_logical_rb4)) # Create array in expected order for chip (reversed)
+        self.asf_ram_rb4 = [0] * (len(self.amp_logical_rb4_full_scale)+2) # Create array to put RAM words into later
+        self.amp_length_rb4 = len(self.amp_logical_rb4_full_scale)
+        self.amp_reversed_rb4 = list(reversed(self.amp_logical_rb4_full_scale)) # Create array in expected order for chip (reversed)
 
-    def _compile_rb1ab_program(self):
-        items = sorted(RB1AB_PROFILE.items(), key=lambda kv: kv[1])
-
-        self.rb1ab_profiles = []
-        self.rb1a_freqs = []
-        self.rb1a_amps = []
-        self.rb1b_freqs = []
-        self.rb1b_amps = []
-
-        for key, profile in items:
-            self.rb1ab_profiles.append(profile)
-            self.rb1a_freqs.append(self.RB1A_frequency_param_handles[key].get())
-            self.rb1a_amps.append(self.RB1A_amp_param_handles[key].get())
-            self.rb1b_freqs.append(self.RB1B_frequency_param_handles[key].get())
-            self.rb1b_amps.append(self.RB1B_amp_param_handles[key].get())
-
-        self.rb1ab_profile_count = len(self.rb1ab_profiles)
 
     def _compile_ram_program(self, profile_map, layout_map, cps_handles, n_steps):
         profiles, starts, ends, steps, modes = [], [], [], [], []
@@ -542,12 +513,11 @@ class UrukulRSCExample(Fragment):
     def host_setup(self):
         super().host_setup()
 
-        # logger.info("Test1")
-
         # Lazy prepare (could be in prepare instead)
-        self._compile_rb1ab_program()
-
+        # These don't depend on parameters, so can go here.
         self._compute_full_scale_RAM_profiles()
+
+        self._compile_sequence()
 
         (self.rb2_ram_profiles,
         self.rb2_ram_starts,
@@ -566,8 +536,64 @@ class UrukulRSCExample(Fragment):
             RB4_PROFILE, RB4_RAM_LAYOUT, self.RB4_cps_param_handles, self.bh_steps
         )
         self.rb4_ram_count = len(self.rb4_ram_profiles)
+
+    def _calculate_pulse_times_mu(self):
+        """
+        Works out how long the pulses will take in mu for the current parameter state.
+        """
+
+        logger.warning("This function did run.")
+                
+        # Work out how long the RAM pulses will take beforehand
+        RB2_dur_mu = {}
+        for key, param_handle in self.RB2_cps_param_handles.items():
+            RB2_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.tukey_steps)
+
+        RB4_dur_mu = {}
+        for key, param_handle in self.RB4_cps_param_handles.items():
+            RB4_dur_mu[key] = self._ram_duration_mu(param_handle.get(), self.bh_steps)
+
+        seq_dur_mu = []
+        for nreps, block in SEQUENCE_BLOCKS:
+            for _ in range(nreps):
+                for pulse_name in block:
+                    p = PULSES[pulse_name]
+
+                    # How long the pulse will take
+                    src_kind, src_key = p.duration_src
+                    if src_kind == "rb2":
+                        seq_dur_mu.append(RB2_dur_mu[src_key])
+                    else:
+                        seq_dur_mu.append(RB4_dur_mu[src_key])
+
+        self.seq_dur_mu = seq_dur_mu
+        self.op_time_mu = self._ceil8_mu(self.core.seconds_to_mu(self.OP_time.get()))
+
+
+
+    def _compile_rb1ab_program(self):
+        """
+        Turns the parameter value handles into nice lists for the kernel. Unfortunately this needs
+        to be run host side at the moment because kernels don't support dictionary access.
+        """
+        items = sorted(RB1AB_PROFILE.items(), key=lambda kv: kv[1])
+
+        self.rb1ab_profiles = []
+        self.rb1a_freqs = []
+        self.rb1a_amps = []
+        self.rb1b_freqs = []
+        self.rb1b_amps = []
+
+        for key, profile in items:
+            self.rb1ab_profiles.append(profile)
+            self.rb1a_freqs.append(self.RB1A_frequency_param_handles[key].get())
+            self.rb1a_amps.append(self.RB1A_amp_param_handles[key].get())
+            self.rb1b_freqs.append(self.RB1B_frequency_param_handles[key].get())
+            self.rb1b_amps.append(self.RB1B_amp_param_handles[key].get())
+
+        self.rb1ab_profile_count = len(self.rb1ab_profiles)
+
         
-        self._compile_sequence()
 
     @kernel
     def configure_RB1AB_single_tone_mode(self):
@@ -620,6 +646,14 @@ class UrukulRSCExample(Fragment):
 
     @kernel
     def configure_RB24_ram_mode(self):
+        
+        # Finish making RAM profile with parameters
+        # 1) Scale current RAM
+        tk_scale_factor = self.RB2_amp_scale.get()
+        self.amp_reversed_rb2_to_upload = tk_scale_factor * self.amp_reversed_rb2
+        # 2) Add in single tone pulse
+        self.amp_reversed_rb2_to_upload[-2] = 0.7 # (Don't have a parameter handle for this yet)
+
         rb2_dds, rb4_dds = self.dds_ch_RB2,self.dds_ch_RB4
         ##### RB2
         # Disable ram mode while setting up
@@ -628,7 +662,7 @@ class UrukulRSCExample(Fragment):
 
         # 1) Loader profile (also the initial profile we start in)
         # This loads all the RAM at once 
-        rb2_dds.amplitude_to_ram(self.amp_reversed_rb2, self.asf_ram_rb2) # Reverse the logical list to get nice indices
+        rb2_dds.amplitude_to_ram(self.amp_reversed_rb2_to_upload, self.asf_ram_rb2) # Reverse the logical list to get nice indices
         self.core.break_realtime()
 
         if self.amp_length_rb2 <= 420:
@@ -659,6 +693,14 @@ class UrukulRSCExample(Fragment):
         rb2_dds.io_update.pulse_mu(8) # Write to CPLD
 
         ##### RB4
+
+        # Finish making RAM profile with parameters
+        # 1) Scale current RAM
+        bh_scale_factor = self.RB4_amp_scale.get()
+        self.amp_reversed_rb4_to_upload = bh_scale_factor * self.amp_reversed_rb4
+        # 2) Add in single tone pulse
+        self.amp_reversed_rb4_to_upload[-2] = 0.7 # (Don't have a parameter handle for this yet)
+
 
         rb4_dds.set_cfr1(ram_enable=0) # Control Function Register 1
         rb4_dds.io_update.pulse_mu(8)
@@ -718,13 +760,16 @@ class UrukulRSCExample(Fragment):
 
     @kernel
     def device_setup(self):
-        self.core.break_realtime()
-        # self.device_setup_subfragments() # Should be NO-OP for this fragment
+        self.device_setup_subfragments() # Should be NO-OP for this fragment
 
+        self.logger.warning("Device_setup ran")
         # TODO: Make this do nothing if no params changed
-                
+            
         # Setup DDS RAM mode, upload RAM, and set profile registers
-        delay(10*us)
+        self._calculate_pulse_times_mu()
+        self._compile_rb1ab_program()
+        self.core.break_realtime()
+        delay(50*us)
         self.configure_RB24_ram_mode()
         delay(10*us)
 

@@ -3,6 +3,7 @@ results/
 dataset_db.mdb
 dataset_db.mdb-lock
 last_rid.pyon
+/third_party/
 **/__pycache__/
 *.log
 
