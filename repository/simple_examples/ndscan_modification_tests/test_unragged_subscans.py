@@ -18,17 +18,21 @@ from ndscan.experiment import (
 
 import numpy as np
 from scipy.optimize import curve_fit
+import time
 
 
 class LineExp(ExpFragment):
+    # This just produces numbers
     def build_fragment(self):
         self.setattr_param("p", FloatParam, "p", default=2.0)
+        self.setattr_param("e", FloatParam, "e", default=2.0)
         self.setattr_param("x", FloatParam, "x", default=0.0)
         self.setattr_result("y")  # Float channel by default
 
     def run_once(self):
         x = self.x.use()
-        m = self.p.use() ** 2  # This is the unknown functional form of how m varies
+        m = self.p.use() ** self.e.use()  # This is the unknown functional form of how m varies
+        time.sleep(0.05)
         self.y.push(m * x)  # simple deterministic number
 
     def get_default_analyses(self):
@@ -69,6 +73,7 @@ class LineExp(ExpFragment):
 
 
 class ScanXExpFrag(SubscanExpFragment):
+    # This fragment gets _m equipped.
     def build_fragment(self):
         self.setattr_fragment("lineexp", LineExp)
         super().build_fragment(self, "lineexp", [(self.lineexp, "x")])
@@ -89,8 +94,46 @@ class ScanXExpFrag(SubscanExpFragment):
         self._configure()
         self.device_setup_subfragments()
 
+    def get_default_analyses(self):
+        return [
+            CustomAnalysis(
+                [self.lineexp.p],
+                self._analyse_quad,
+                [
+                    OpaqueChannel("fit_xs"),
+                    OpaqueChannel("fit_ys"),
+                    FloatChannel("fit_e", "extracted e"),
+                ],
+            )
+        ]
+
+    def _analyse_quad(self, axis_values, result_values, analysis_results):
+        x = axis_values[self.lineexp.p]
+        y = result_values[self._m]
+
+        def model(p, e):
+            return p**e 
+
+        popt, pcov = curve_fit(model, x, y)
+        fit_e = popt[0]
+
+        fit_xs = np.linspace(np.min(x), np.max(x), 20)
+        fit_ys = model(fit_xs, fit_e)
+
+        analysis_results["fit_xs"].push(fit_xs)
+        analysis_results["fit_ys"].push(fit_ys)
+        analysis_results["fit_e"].push(fit_e)
+
+        return [
+            annotations.curve_1d(
+                x_axis=self.lineexp.p, x_values=fit_xs, y_axis=self._m, y_values=fit_ys
+            )
+        ]
+
+
 
 class HowDoesPVaryExpFrag(SubscanExpFragment):
+    # This fragment gets the analysis over the gradients equipped, _fit_e
     def build_fragment(self):
         self.setattr_fragment("scanxexp", ScanXExpFrag)
         super().build_fragment(self, "scanxexp", [(self.scanxexp.lineexp, "p")])

@@ -1015,6 +1015,9 @@ class UrukulRSCExample(Fragment):
 
     @kernel
     def _set_rsc_profiles(self, rb1ab_prof, rb2_prof, rb4_prof):
+        """
+        WARNING: ASSUMES PER CHANNEL PROFILE BITS, ONLY ON PROTO REV 9.
+        """
         cfg = self.dds_cpld_rsc.cfg_reg
 
         clear_mask = (

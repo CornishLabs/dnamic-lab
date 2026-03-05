@@ -4,7 +4,7 @@ from aliases import aliases
 custom_controllers = {
     "andor_ctrl": {
         "type": "controller",
-        "host": "::1",
+        "host": "localhost",
         "port": 4010,
         "target_name": "camera",
         "command": "/home/lab/artiq-files/dnamic-lab/ndsps/andor-camera/host/run_aqctl_andor_emccd -v -p {port} --bind {bind}",
@@ -21,7 +21,7 @@ custom_controllers = {
     },
     "AWGTest4Ch": {
         "type": "controller",
-        "host": "::1",
+        "host": "localhost",
         "port": 4015,
         "target_name": "awg",
         "command": "/home/lab/artiq-files/dnamic-lab/ndsps/spectrum-awg/host/run_aqctl_spectrum_awg --serial-number 14926 --characterisation-lookup-str AWG_817_CALIB --sample-rate 625000000 --gpu  -vv -p {port} --bind {bind}",

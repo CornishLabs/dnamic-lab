@@ -15,7 +15,7 @@ from ndscan.experiment import (
     annotations,
     OpaqueChannel,
 )
-
+import time
 import numpy as np
 from scipy.optimize import curve_fit
 
@@ -29,6 +29,7 @@ class LineExp(ExpFragment):
     def run_once(self):
         x = self.x.use()
         m = self.p.use() ** 2  # This is the unknown functional form of how m varies
+        time.sleep(0.5)
         self.y.push(m * x)  # simple deterministic number
 
     def get_default_analyses(self):
