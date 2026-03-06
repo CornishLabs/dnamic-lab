@@ -517,3 +517,65 @@ Why better:
 makes sink behavior explicit
 removes duplicated metadata push paths
 gives one place to evolve flat schema
+
+## Plan:
+
+Good call. Here’s an **implementation-first roadmap** (feature -> how to check it works), not just unit-test-first.
+
+1. **Add relation engine (code-defined only, no UI)**
+- Implement: `RelationGraph` + `bind_param_relation(...)` on fragment side.
+- Scope: host runner only, existing grid scans unchanged.
+- Check: make a tiny experiment where `q = p**2 + 4`, scan `p=[3,6,7]`, print/use `q` in `run_once`; verify values are `[13, 40, 53]` during run and in datasets.
+- Commit: `feat(experiment): add relation graph and code-defined derived params`
+
+2. **Record applied parameter vectors in datasets**
+- Implement: write `points.param_*` for non-axis params + metadata alias from `axis_i -> param`.
+- Check: rerun step 1 example, inspect datasets and confirm:
+  - `points.axis_0` exists for scanned axis
+  - `points.param_q` exists for derived param
+  - no duplicate param dataset for axis param unless explicitly enabled.
+- Commit: `feat(data): record applied params per point with axis alias metadata`
+
+3. **Add tandem/zip scan mode**
+- Implement: zip-group point generation (not Cartesian) for selected axes.
+- Check: scan `a=[1,2,3]`, `b=[10,20,30]` in tandem; verify pairs are `(1,10),(2,20),(3,30)` only. Also verify mismatch lengths raise clear error.
+- Commit: `feat(scan): add tandem zip strategy for linked axes`
+
+4. **Introduce `ProgramScanRunner` with grid adapter**
+- Implement: new runner path using `next_point()/observe()`, with adapter that reproduces current grid behavior.
+- Check: run a 1D and 2D existing experiment through both old runner and new runner, compare point coordinates and channel arrays (same values/order).
+- Commit: `refactor(runner): add ProgramScanRunner with grid compatibility adapter`
+
+5. **Add pseudo-parameter API (code-side)**
+- Implement: `setattr_pseudoparam(...)` and binding to physical params through relations.
+- Check: AOM-like example where user scans pseudo detuning/intensity and physical rf params are driven; verify run uses physical driven values and datasets include them.
+- Commit: `feat(fragment): add pseudo-parameter API and bindings`
+
+6. **Add UI formula relations (serialize only first)**
+- Implement: dashboard fields for formulas; store into `ndscan_params["scan"]["relations"]`.
+- Check: edit in GUI, save arguments, inspect serialized params payload (no runtime execution yet).
+- Commit: `feat(dashboard): serialize per-parameter relation expressions`
+
+7. **Enable runtime execution of UI formulas with safe evaluator**
+- Implement: AST-based safe expression evaluator (no raw `eval`) wired into relation graph.
+- Check: formula works for valid math; blocked for unsafe expressions; clear user error messages.
+- Commit: `feat(execution): evaluate UI relations safely at point runtime`
+
+8. **Add adaptive strategy interface + mock backend**
+- Implement: `AdaptiveAskTellStrategy` + backend protocol.
+- Check: run with deterministic mock optimizer, verify ask/tell loop and per-shot parameter updates.
+- Commit: `feat(scan): add adaptive ask/tell strategy interface`
+
+9. **Subscan integration**
+- Implement: allow subscans to use same strategy/relation pipeline; keep `starts` mapping intact.
+- Check: nested example (top-level + subscan) with derived params and bubbled results; verify correct segment slicing per parent index.
+- Commit: `feat(subscan): support program strategies and relations in subscans`
+
+10. **Kernel bridge (open-loop first)**
+- Implement: pre-resolve open-loop points host-side and stream to existing kernel runner.
+- Check: emulator kernel tests for grid+tandem+relations pass; adaptive remains host-only initially.
+- Commit: `feat(kernel): bridge open-loop program points to kernel runner`
+
+---
+
+If you want a concrete “start now” item: do **Step 1** first. It’s small, user-visible immediately, and doesn’t force runner/UI rewrites yet.
