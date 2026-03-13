@@ -76,6 +76,9 @@ class ScanXExpFrag(SubscanExpFragment):
     # This fragment gets _m equipped.
     def build_fragment(self):
         self.setattr_fragment("lineexp", LineExp)
+
+         # Detach the given fragment from  execution pipline and reconfigure this fragment as a 
+         # fragment whose purpose is to run it.
         super().build_fragment(self, "lineexp", [(self.lineexp, "x")])
 
     def _configure(self): # THIS IS UNRAGGED
