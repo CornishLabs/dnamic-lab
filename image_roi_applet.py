@@ -5,6 +5,8 @@
 # - interactive pixel-snapped ROIs that write back to the 'rois' dataset
 # - single top-row toolbar: [Autoscale] [Auto once]  <x,y,val>
 # - autoscale uses min/max; histogram bounds stay in sync
+# To run use the applet command: 
+# `${python} image_roi_applet.py --rois rois last_image`
 
 import numpy as np
 import importlib.util
