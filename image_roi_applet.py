@@ -7,6 +7,7 @@
 # - autoscale uses min/max; histogram bounds stay in sync
 # To run use the applet command: 
 # `${python} image_roi_applet.py --rois rois last_image`
+# `${python} image_roi_applet.py --rois debug.imaging.rois_image0 debug.imaging.image0`
 
 import numpy as np
 import importlib.util
