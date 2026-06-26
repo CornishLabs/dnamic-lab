@@ -1,60 +1,37 @@
-Nix flakes for Durham Neutral Atom and Molecule Improved Control
-==========================================================
+# Nix ARTIQ environment
 
-This repository contains derivations for deploying ARTIQ via the
-[Nix package manager](https://nixos.org/download/).
+This directory defines the Nix development shell for the ARTIQ master/dashboard environment.
 
-This is a de-oxforded version of the [`nix-oitg`](https://github.com/OxfordIonTrapGroup/nix-oitg.git) repository as described in their readme.
+For normal setup and usage, see the root [README.md](../../README.md). Dependency ownership and known manual dependencies are tracked in [docs/environment_dependencies.md](../../docs/environment_dependencies.md).
 
-For now, this only installs artiq, and some extra python dependencies, additional dependencies will be installed into the python venv via pip.
+The flake currently provides:
 
-Everything exists in a `~/scratch` directory.
+- ARTIQ and related M-Labs packages from the pinned flake inputs
+- selected lab Python/scientific packages used from the ARTIQ side
+- CUDA-enabled `torch` and `gpytorch`, fetched from the CUDA binary cache when available
+- `artiq-lab-tmux`
+- `gtkwave`
+- an interactive nested `artiq-nix-dev` venv bridge for local Python overrides
 
+For now, `ndscan` and `oitg` are not treated as stable Nix packages in this repository. They are installed manually into the nested venv from editable checkouts under `~/artiq-files/install`, as described in the root README. Their missing Python-only dependencies may also be installed into the venv, but `torch` and `gpytorch` should continue to resolve from `/nix/store`.
+
+Check this with:
+
+```bash
+python -c "import torch; print(torch.__file__)"
 ```
-# Make the scratch directory
-cd ~/
-mkdir scratch
-cd ~/scratch
 
-# Clone this repo (that contains a flake that sets up a dev shell)
-git clone https://github.com/CornishLabs/dnamic-setup
+The path should start with `/nix/store`, not `~/artiq-files/install/virtualenvs/artiq-nix-dev`.
 
-# Clone the relevant repositorys to be installed into the python venv
-git clone https://github.com/OxfordIonTrapGroup/oitg
-git clone https://github.com/tomhepz/ndscan
+When those packages and their lab-facing interfaces settle, move this out of manual venv state. The preferred stable state is to package them in this flake, following the OxfordIonTrapGroup/nix-oitg pattern, or to use a small locked ARTIQ overlay with pinned git refs.
 
+This setup was originally derived from OxfordIonTrapGroup/nix-oitg, but the root README is now the setup guide for this repository.
 
-# Create the dev environment
-# This command will:
-#  - Use nix flakes to install relevant packages (artiq, python, certain python packages e.g. pandas) within a nix context
-#  - Then use a shell hook to manage a python virtual environment that will be stored in `~/scratch/nix-artiq-venvs`
+For debugging, the tmux launcher roughly starts:
 
-nix develop ~/scratch/dnamic-setup
-
-# Then install the python packages into this environment, as the shell hook script describes
-
-pip install --config-settings editable_mode=compat --no-dependencies -e ~/scratch/oitg
-pip install --config-settings editable_mode=compat --no-dependencies -e ~/scratch/ndscan
-
-# Then run artiq with the ndscan package, for some reason I have required
-# running the frontend command with the `python` activated with the dev shell directly...
-
-cd ~/artiq-master
-
-> $ (artiq-master-dev) tom@tom-artiq-test-rig:~/artiq-master$ ls
-> device_db.py  repository
-
-# Then run either:
-artiq-lab-tmux
-# Which will run all commands in a TMUX session (Recommended)
-
-# OR run the commands individually
-# THIS IS DEPRICATED FOR THE SETUP, BECAUSE NEED TO SET HOME ENV VARIABLES TO GET THE ARTIQ FOLDER STRUCTURE TO WORK AS MODULES
-# BUT THESE ARE THE COMMANDS THAT WOULD START COMPONENTS OF 'NORMAL'/'BARE' ARTIQ
+```bash
 python -m artiq.frontend.artiq_master
-ndscan_dataset_janitor 
 python -m artiq_comtools.artiq_ctlmgr
+ndscan_dataset_janitor
 python -m artiq.frontend.artiq_dashboard -p ndscan.dashboard_plugin
 ```
-
-

@@ -3,7 +3,8 @@
 We want to use the `ubuntu-drivers` to install the 'open' and 'server' drivers.
 For example
 ```
-sudo ubuntu-drivers install --gpgpu nvidia:590-server-open
+sudo ubuntu-drivers install --gpgpu nvidia:595-server-open
+sudo apt install nvidia-utils-595-server
 sudo reboot
 ```
 

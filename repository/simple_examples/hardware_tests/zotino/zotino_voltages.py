@@ -1,6 +1,6 @@
 from artiq.experiment import *     
 
-class SetZotinoVoltages(EnvExperiment):
+class SetZotinoVoltagesTest(EnvExperiment):
     
     def build(self):
         self.setattr_device("core")

@@ -25,12 +25,12 @@ class CopyRisingEdges(EnvExperiment):
         self.ttl_in  = self.get_device("ttl4")   # TTLInOut
         self.ttl_out = self.get_device("ttl0")   # TTLOut or TTLInOut
 
-        self.setattr_argument("copy_offset", NumberValue(2*us, unit="s", step=100*ns, ndecimals=3))
-        self.setattr_argument("pulse_width", NumberValue(200*ns, unit="s", step=10*ns, ndecimals=3))
-        self.setattr_argument("wait_timeout", NumberValue(1*s, unit="s", step=1*ms, ndecimals=3))
+        self.setattr_argument("copy_offset", NumberValue(2*us, unit="s", step=100*ns, precision=3))
+        self.setattr_argument("pulse_width", NumberValue(200*ns, unit="s", step=10*ns, precision=3))
+        self.setattr_argument("wait_timeout", NumberValue(1*s, unit="s", step=1*ms, precision=3))
 
         # Optional: stop after N edges (-1 = run forever)
-        self.setattr_argument("max_edges", NumberValue(-1, min=-1, ndecimals = 0, scale = 1, step=1, type='int'))
+        self.setattr_argument("max_edges", NumberValue(-1, min=-1, precision = 0, scale = 1, step=1, type='int'))
 
     @kernel
     def run(self):

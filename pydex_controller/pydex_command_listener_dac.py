@@ -29,7 +29,7 @@ LOGGER = logging.getLogger("pydex_controller.pydex_command_listener_dac")
 
 ############################
 PYDEX_HOST = "192.168.23.10"
-PYDEX_PORT = 8636
+PYDEX_PORT = 8641
 DAC_FIELD_NAMES = {"NEGX_mV", "NEGZ_mV", "COM_mV", "CHECK_mV"}
 
 @dataclass
