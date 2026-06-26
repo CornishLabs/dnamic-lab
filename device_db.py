@@ -30,7 +30,7 @@ custom_controllers = {
 
 # Configuration of sim is set in .dax
 device_db_to_mod = ddb_gen 
-
+"""
 for device_name, device_config in ddb_gen.items():
     try:
         # Patch any CPLD devices which don't have "io_update_device" devices to be
@@ -57,5 +57,6 @@ for device_name, device_config in ddb_gen.items():
 
     except KeyError:
         pass
+"""
 
 device_db = (device_db_to_mod | aliases | custom_controllers) # (modified)
