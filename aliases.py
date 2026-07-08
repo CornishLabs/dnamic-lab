@@ -1,6 +1,4 @@
 aliases = {
-    # General
-    "ttl_camera_exposure": "ttl0",
     # Laser table
     ## Shutters
     "ttl_cs_cool_shut": "ttl32",
@@ -27,9 +25,11 @@ aliases = {
     "dds_ch_RB2": "urukul6_ch2",
     "dds_ch_RB4": "urukul6_ch3",
     "dds_cpld_rsc": "urukul6_cpld",
+    
+    # General
+    "ttl_camera_exposure": "ttl16",
     # Main table:
-    "ttl_quad": "ttl16",
+    "ttl_quad": "ttl0",
     ## SUServo channels
     "suservo_ch_817": "suservo0_ch0",
-    "spec_seq_awg0": "ttl16" #TODO: REMOVE
 }

@@ -15,7 +15,7 @@ custom_controllers = {
         "class": "AndorCamera",
         "arguments": {
             "camera": "andor_ctrl",
-            "exposure_ttl": "ttl0",
+            "exposure_ttl": "ttl_camera_exposure",
             "core": "core",
         },
     },

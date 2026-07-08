@@ -115,7 +115,7 @@ class SetUrukulTone(EnvExperiment):
         self.setattr_argument(
             "attenuation",
             NumberValue(
-                6.0 * dB,
+                8.0 * dB,
                 unit="dB",
                 scale=dB,
                 step=1.0 * dB,

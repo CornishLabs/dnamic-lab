@@ -8,7 +8,8 @@ class SetZotinoVoltagesTest(EnvExperiment):
 
     def prepare(self):
         self.channels = [0, 1, 2, 3]
-        self.voltages = [1.0, 2.0, 3.0, 4.0]
+        # self.voltages = [-0.367, 0.8, -0.112, 8.8]  #Rb
+        self.voltages = [0.04, 0.47, -0.34, 8.8] # Cs
     
     @kernel
     def run(self):

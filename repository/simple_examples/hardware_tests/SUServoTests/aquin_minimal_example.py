@@ -22,19 +22,19 @@ class SUServoMinimal(EnvExperiment):
         
         # Set Sampler gain and Urukul attenuation
         g = 0     # The four gain settings (0, 1, 2, 3) corresponds to gains of (1, 10, 100, 1000) respectively.
-        A = 0.0
+        A = 8.0
         self.suservo0.set_pgia_mu(0, g)        # set (prog. gain. inst. amp) gain on Sampler channel 0 to 10^g
         self.suservo0.cplds[0].set_att(0, A)   # set attenuation on Urukul channel 0 to 0
         
         # Set physical parameters
-        v_t = 1.8                              # target input voltage (V) for Sampler channel
+        v_t = 1.12                             # target input voltage (V) for Sampler channel
         f = 80_000_000.0                       # frequency (Hz) of Urukul output
         
         o = -v_t*(10.0**(g-1))                 # offset to assign to servo to reach target voltage
 
         # Set PI loop parameters 
-        kp = -0.8                              # proportional gain in loop
-        ki = -350_000.0                        # integrator gain
+        kp = -1.8                              # proportional gain in loop
+        ki = -1550_000.0                        # integrator gain
         
         gl = 0.0                               # integrator gain limit
         adc_ch = 0                             # Sampler channel to read from
@@ -48,12 +48,12 @@ class SUServoMinimal(EnvExperiment):
         delay(20*ms)
 
         # Pause servo to readback current ADC value
-        self.suservo0.set_config(enable=0)
-        delay(4*us) # time to stop updates to IIR
-        adc_v = self.suservo0.get_adc(0)
-        y = self.suservo0_ch0.get_y(0)
-        self.suservo0.set_config(enable=1)
+        # self.suservo0.set_config(enable=0)
+        # delay(4*us) # time to stop updates to IIR
+        # adc_v = self.suservo0.get_adc(0)
+        # y = self.suservo0_ch0.get_y(0)
+        # self.suservo0.set_config(enable=1)
 
-        # Print output
-        print("  ADC0 voltage [V] =", adc_v)
-        print("  y (0..1)          =", y)
+        # # Print output
+        # print("  ADC0 voltage [V] =", adc_v)
+        # print("  y (0..1)          =", y)

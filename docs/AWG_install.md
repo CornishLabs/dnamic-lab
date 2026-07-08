@@ -135,3 +135,110 @@ sbench6
 spcddscontrol
 spcmcontrol
 ```
+
+# Rebuild, sign, load, and check the Spectrum `spcm4` kernel driver
+
+This assumes:
+
+- You are running Ubuntu with Secure Boot enabled.
+- You already have a MOK signing key at `~/module-signing/MOK.priv` and `~/module-signing/MOK.der`.
+- You are inside the Spectrum kernel driver source directory, for example:
+  `~/software-downloads/spcm4-3.13.23699`.
+
+```bash
+# Check which kernel you are currently running.
+# The Spectrum kernel module must be built for this exact kernel version.
+uname -r
+
+# Install the tools and kernel headers needed to build and sign the driver.
+# This is safe to rerun; apt will skip packages that are already installed.
+sudo apt update
+sudo apt install -y build-essential linux-headers-$(uname -r) mokutil openssl
+
+# Move into the Spectrum kernel driver source directory.
+# Change this path if your driver source is somewhere else.
+cd ~/software-downloads/spcm4-3.13.23699
+
+# Rebuild and install the Spectrum spcm4 kernel driver for the current kernel.
+# This script compiles spcm4.ko, copies it into /lib/modules/$(uname -r),
+# updates module dependencies, installs udev rules, and may try to load it.
+# If Secure Boot is enabled, the final load step may fail until we sign it.
+sudo ./make_spcm4_linux_kerneldrv.sh
+
+# Confirm that the module now exists and print the installed module path.
+# This should return a path to spcm4.ko under /lib/modules/$(uname -r)/...
+modinfo -n spcm4
+
+# Store the path to Ubuntu's kernel module signing helper.
+SIGNFILE="/lib/modules/$(uname -r)/build/scripts/sign-file"
+
+# Store the path to the installed Spectrum kernel module.
+MODPATH="$(modinfo -n spcm4)"
+
+# Sign the installed spcm4 kernel module using your enrolled MOK private key.
+# This is required when Secure Boot rejects unsigned third-party modules.
+sudo "$SIGNFILE" sha256 ~/module-signing/MOK.priv ~/module-signing/MOK.der "$MODPATH"
+
+# Refresh module dependency information after signing.
+sudo depmod -a
+
+# Check whether the module now reports a signer.
+# Expected output should include something like: spcm module signing
+modinfo -F signer spcm4
+
+# Check the signature key information embedded in the module.
+modinfo -F sig_key spcm4
+
+# Load the signed Spectrum kernel module.
+sudo modprobe -v spcm4
+
+# Show recent kernel messages, useful if modprobe fails.
+# Look for messages about spcm4, unsigned modules, rejected keys, PCI, BARs, or resources.
+sudo dmesg -T | grep -iE 'spcm|spectrum|unsigned|rejected|secure|lockdown|module|pci|bar|iommu|resource' | tail -100
+
+# Confirm that the spcm4 module is loaded.
+lsmod | grep spcm
+
+# Check whether the Spectrum driver sees the card.
+# A successful result should list /dev/spcm0 and the card type.
+cat /proc/spcm4_cards
+
+# Check that the device node was created.
+ls -l /dev/spcm*
+```
+
+If `modprobe` still says `Key was rejected by service`, check whether the MOK key is enrolled:
+
+```bash
+# Check whether Secure Boot is enabled.
+mokutil --sb-state
+
+# Check whether your MOK public key is enrolled.
+mokutil --test-key ~/module-signing/MOK.der
+```
+
+If the key is not enrolled:
+
+```bash
+# Import the public MOK key.
+# You will be asked to create a one-time password.
+sudo mokutil --import ~/module-signing/MOK.der
+
+# Reboot afterwards.
+# On the blue MOK Manager screen:
+#   Enroll MOK → Continue → Yes → enter the password → reboot
+sudo reboot
+```
+
+After rebooting, load and check again:
+
+```bash
+# Load the signed driver.
+sudo modprobe -v spcm4
+
+# Confirm that the driver sees the card.
+cat /proc/spcm4_cards
+
+# Confirm that /dev/spcm0 exists.
+ls -l /dev/spcm*
+```
