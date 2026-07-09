@@ -18,7 +18,7 @@ def get_argparser():
 
     p.add_argument("--simulation", action="store_true")
     p.add_argument("--config-path", default="/usr/local/etc/andor")
-    p.add_argument("--temp", type=int, default=-50)
+    p.add_argument("--temp", type=int, default=-60)
 
     # Trigger mode as int so you can pass Andor enum values directly for now.
     p.add_argument("--trigger-mode", type=int, default=None,
@@ -38,6 +38,7 @@ def main():
 
     # Typical cold operation:
     cam.cooler_on()
+    cam.set_cooler_mode(True)
     cam.set_temperature(args.temp)
 
     # Common defaults; adjust as needed:

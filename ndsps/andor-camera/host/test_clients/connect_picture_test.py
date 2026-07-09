@@ -5,14 +5,6 @@ import matplotlib.pyplot as plt
 
 from sipyco.pc_rpc import Client
 
-# Optional: only if pyAndorSDK2 is installed on the client machine.
-# If not installed, we'll just skip setting trigger mode here.
-try:
-    from pyAndorSDK2 import atmcd_codes
-    ANDOR_CODES = atmcd_codes
-except Exception:
-    ANDOR_CODES = None
-
 
 def main():
     # Change these to match your controller config
@@ -29,25 +21,12 @@ def main():
 
     c = Client(HOST, PORT, TARGET)
     try:
-        # Basic connectivity check
-        if hasattr(c, "ping"):
-            assert c.ping() is True
+        assert c.ping() is True
 
         print("Enabling cooler + setting temperature...")
-        if hasattr(c, "cooler_on"):
-            c.cooler_on()
-        else:
-            print("WARNING: controller has no cooler_on() method")
-
-        if hasattr(c, "set_temperature"):
-            c.set_temperature(TEMP_SETPOINT_C)
-        else:
-            print("WARNING: controller has no set_temperature() method")
-        
-        if hasattr(c, "set_shutter"):
-            c.set_shutter()
-        else:
-            print("WARNING: controller has no set_shutter() method")
+        c.cooler_on()
+        c.set_temperature(TEMP_SETPOINT_C)
+        c.set_shutter_permanently_open()
 
         # Temperature polling
         print(f"Polling temperature for {POLL_SECONDS:.1f} s ...")
@@ -61,66 +40,26 @@ def main():
             if elapsed >= POLL_SECONDS:
                 break
 
-            if hasattr(c, "get_temperature"):
-                out = c.get_temperature()
-                # Common patterns:
-                #  - returns temp (float/int)
-                #  - returns (code, temp)
-                if isinstance(out, (tuple, list)) and len(out) >= 2:
-                    code, temp = out[0], out[1]
-                else:
-                    code, temp = None, out
-
-                ts.append(elapsed)
-                temps.append(float(temp))
-                codes.append(code)
-
-                if code is None:
-                    print(f"  t={elapsed:5.2f}s  T={temp}")
-                else:
-                    print(f"  t={elapsed:5.2f}s  T={temp}  code={code}")
-            else:
-                raise RuntimeError("Controller does not provide get_temperature()")
+            code, temp = c.get_temperature()
+            ts.append(elapsed)
+            temps.append(float(temp))
+            codes.append(code)
+            print(f"  t={elapsed:5.2f}s  T={temp}  code={code}")
 
             time.sleep(POLL_PERIOD_S)
 
         # Configure camera for a single image
         print("Configuring ROI/exposure...")
-        if hasattr(c, "stop_acquisition"):
-            try:
-                c.stop_acquisition()
-            except Exception:
-                pass
-
-        if hasattr(c, "set_trigger_mode"):
-            # If you want INTERNAL trigger for this test shot:
-            if ANDOR_CODES is not None:
-                try:
-                    c.set_trigger_mode(int(ANDOR_CODES.Trigger_Mode.INTERNAL))
-                except Exception as e:
-                    print(f"WARNING: set_trigger_mode(INTERNAL) failed: {e}")
-            else:
-                # If your controller expects Andor numeric constants and you don't have them here,
-                # either install pyAndorSDK2 on this machine or comment this out.
-                print("NOTE: pyAndorSDK2 not available in client env; skipping set_trigger_mode().")
-
+        c.abort_acquisition(ignore_idle=True)
+        c.set_trigger_mode(0)  # Andor Trigger_Mode.INTERNAL
         c.set_image_region(*ROI)
         c.set_exposure_time(float(EXPOSURE_S))
 
         # Acquire one frame
         print("Acquiring one frame...")
-        if hasattr(c, "acquire_one"):
-            img = c.acquire_one()
-        else:
-            # Explicit sequence
-            if hasattr(c, "prepare"):
-                c.prepare()
-            c.start_acquisition()
-            c.wait()
-            if hasattr(c, "get_image16"):
-                img = c.get_image16()
-            else:
-                raise RuntimeError("Need either acquire_one() or (wait()+get_image16()) methods")
+        c.prepare()
+        c.start_acquisition()
+        img = c.wait_get_image16(timeout_ms=5000)
 
         img = np.asarray(img, dtype=np.uint16)
         print(f"Got image: shape={img.shape} dtype={img.dtype} bytes={img.nbytes}")

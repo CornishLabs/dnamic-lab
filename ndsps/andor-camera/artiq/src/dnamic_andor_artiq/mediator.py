@@ -1,6 +1,4 @@
-from artiq.language.core import kernel, delay
-from artiq.language.units import us
-import time
+from artiq.language.core import kernel
 
 
 class AndorCamera:
@@ -28,54 +26,23 @@ class AndorCamera:
     # Host (RPC) convenience API
     # -------------------------
 
-    def arm(self):
-        """
-        Arm camera to wait for trigger/exposure.
-        Prefer split steps if your controller exposes them.
-        """
-        if hasattr(self.cam, "prepare"):
-            self.cam.prepare()
-        if hasattr(self.cam, "start_acquisition"):
-            self.cam.start_acquisition()
-        else:
-            raise RuntimeError("Controller missing start_acquisition()")
+    def arm(self, configure: bool = True):
+        """Configure if requested, then arm for one externally timed image."""
+        self.cam.start_external_exposure_single(configure=configure)
 
     def wait_done(self, timeout_s: float | None = None):
-        """
-        Wait for acquisition completion. If your controller has a timeout-capable wait,
-        use it. Otherwise this will block indefinitely.
-        """
-        if timeout_s is None:
-            return self.cam.wait()
-
-        # Best: implement a timeout RPC in the controller.
-        if hasattr(self.cam, "wait_timeout"):
-            return self.cam.wait_timeout(timeout_s)
-
-        # Fallback: naive host-side timeout loop if you have nonblocking status
-        if hasattr(self.cam, "is_done"):
-            t0 = time.time()
-            while True:
-                if self.cam.is_done():
-                    return
-                if time.time() - t0 > timeout_s:
-                    raise TimeoutError("Camera wait timed out")
-                time.sleep(0.005)
-
-        raise RuntimeError("No timeout wait available (add wait_timeout() or is_done() to controller)")
+        timeout_ms = None if timeout_s is None else int(1000.0 * timeout_s)
+        self.cam.wait(timeout_ms=timeout_ms)
 
     def fetch_image(self):
         """Fetch the image array via RPC."""
-        if hasattr(self.cam, "get_image16"):
-            return self.cam.get_image16()
-        if hasattr(self.cam, "get_image"):
-            return self.cam.get_image()
-        raise RuntimeError("Controller missing get_image16()/get_image()")
+        return self.cam.get_image16()
 
     def acquire_with_ttl_exposure(self, exposure_s: float,
                                   *,
                                   trigger_pulse: bool = False,
-                                  wait_timeout_s: float | None = None):
+                                  wait_timeout_s: float | None = None,
+                                  configure: bool = True):
         """
         Typical pattern:
           host: arm camera
@@ -83,12 +50,11 @@ class AndorCamera:
           host: wait and fetch image
         """
         # Ensure RTIO timeline is in a sane state before kernel actions
-        self.arm()
+        self.arm(configure=configure)
 
         self.core.break_realtime()
         # Deterministic exposure timing on RTIO
         self.ttl_expose(exposure_s)
 
-        # Back on host: wait for readout + fetch frame
-        self.wait_done(timeout_s=wait_timeout_s)
-        return self.fetch_image()
+        timeout_ms = None if wait_timeout_s is None else int(1000.0 * wait_timeout_s)
+        return self.cam.wait_get_image16(timeout_ms=timeout_ms)

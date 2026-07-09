@@ -144,6 +144,8 @@ class SetUrukulTone(EnvExperiment):
         self.core.break_realtime()
 
         self.dds.cpld.init()
+        self.core.break_realtime()
+        delay(50*ms)
         self.dds.init()
         delay(10 * ms)
 

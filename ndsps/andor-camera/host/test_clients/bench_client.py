@@ -17,12 +17,14 @@ def main():
         lat = []
         for _ in range(n):
             t0 = time.perf_counter()
-            img = c.acquire_one()
+            c.prepare()
+            c.start_acquisition()
+            img = c.wait_get_image16(timeout_ms=5000)
             t1 = time.perf_counter()
             lat.append((t1 - t0) * 1e3)
             assert isinstance(img, np.ndarray)
 
-        print(f"acquire_one(): mean={sum(lat)/len(lat):.2f} ms min={min(lat):.2f} ms max={max(lat):.2f} ms")
+        print(f"single image: mean={sum(lat)/len(lat):.2f} ms min={min(lat):.2f} ms max={max(lat):.2f} ms")
         print("image:", img.shape, img.dtype, img.nbytes, "bytes")
     finally:
         c.close_rpc()

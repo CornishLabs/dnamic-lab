@@ -1,5 +1,3 @@
-from contextlib import suppress
-
 from artiq.coredevice.ad9910 import AD9910
 from artiq.coredevice.core import Core
 from artiq.coredevice.ttl import TTLOut
@@ -13,7 +11,6 @@ from artiq.language.core import delay
 
 from artiq.language.units import MHz
 from artiq.language.units import V
-from artiq.language.units import dB
 from artiq.language.units import ms
 from artiq.language.units import s
 
@@ -27,16 +24,71 @@ from ndscan.runtime.api import make_fragment_prepared_dashboard_scan_exp
 
 
 DDS_ATTEN_DB = 8.0 # This is what we use across all DDS Channels
+CAMERA_TEMP_C = -60
+CAMERA_GAIN = 10
+CAMERA_OUTPUT_AMPLIFIER = 0
+CAMERA_AD_CHANNEL = 0
+CAMERA_HSSPEED_INDEX = 2
+CAMERA_VSSPEED_INDEX = 4
+CAMERA_PREAMP_GAIN_INDEX = 2  # Old preampgain=3 was a 1-based UI setting.
+CAMERA_EXPOSURE_TIME = 10.0 * ms
+CAMERA_FAST_EXT_TRIGGER = False
+CAMERA_ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
+
+
+def configure_andor_for_rb_single_image(andor_ctrl):
+    """Apply the old Andor single-image profile used for Rb images."""
+    andor_ctrl.abort_acquisition(ignore_idle=True)
+    andor_ctrl.cooler_on()
+    andor_ctrl.set_cooler_mode(True)
+    andor_ctrl.set_temperature(CAMERA_TEMP_C)
+    andor_ctrl.set_em_gain(CAMERA_GAIN)
+    andor_ctrl.set_readout_profile(
+        output_amplifier=CAMERA_OUTPUT_AMPLIFIER,
+        ad_channel=CAMERA_AD_CHANNEL,
+        hsspeed_index=CAMERA_HSSPEED_INDEX,
+        vsspeed_index=CAMERA_VSSPEED_INDEX,
+        preamp_gain_index=CAMERA_PREAMP_GAIN_INDEX,
+    )
+    andor_ctrl.configure_external_exposure_run_till_abort(
+        roi=CAMERA_ROI,
+        fast_ext_trigger=CAMERA_FAST_EXT_TRIGGER,
+        exposure_time_s=CAMERA_EXPOSURE_TIME,
+    )
 
 # MOT stage good values
 RB_COOL_DDS_FREQ_MHZ_MOT = 101.25
 RB_COOL_DDS_ASF_MOT = 0.45
 RB_REPUMP_DDS_FREQ_MHZ_MOT = 80.64
 RB_REPUMP_DDS_ASF_MOT = 0.32
-RB_EW_SHIMS_V_MOT = -0.367 
-RB_UD_SHIMS_V_MOT = 0.8
-RB_NS_SHIMS_V_MOT = -0.112
+RB_EW_SHIMS_V_MOT = -0.367 # -0.406
+RB_UD_SHIMS_V_MOT = 0.8    #  0.867
+RB_NS_SHIMS_V_MOT = -0.112 # -0.122
 RB_QUAD_V_MOT = 8.8
+
+# Initial transfer/imaging values from the old control system. ASFs are scaled
+# from the MOT dBm values, assuming DDS ASF is an RF voltage amplitude.
+RB_COOL_DDS_FREQ_MHZ_MOLASSES = 136.16 # CHECKED
+RB_COOL_DDS_ASF_MOLASSES = 0.67
+RB_REPUMP_DDS_ASF_MOLASSES = 0.28
+RB_EW_SHIMS_V_MOLASSES = -0.12
+RB_UD_SHIMS_V_MOLASSES = 1.15
+RB_NS_SHIMS_V_MOLASSES = 0.55
+
+
+# COOLING STAGE BEFORE IMAGING
+RB_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING = 125.54 # CHECKED
+RB_COOL_DDS_ASF_TWEEZER_COOLING = 0.43
+RB_REPUMP_DDS_ASF_TWEEZER_COOLING= 0.2
+
+# IMAGING
+RB_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE = 103.49 # CHECKED
+RB_COOL_DDS_ASF_TWEEZER_IMAGE = 0.415
+RB_REPUMP_DDS_ASF_TWEEZER_IMAGE = 0.12
+
+RB_EW_SHIMS_V_IMAGING_COOLING = -0.05  #CHECKED
+RB_UD_SHIMS_V_IMAGING_COOLING = 1.1
+RB_NS_SHIMS_V_IMAGING_COOLING = 0.1
 
 class HardwareInitOnce(Fragment):
     # TODO: Eventually this fragment should not manually enumerate the names of the
@@ -180,39 +232,46 @@ class KnownHardwareState(Fragment):
 
 class RbLightService(Fragment):
 
-    def build_fragment(self):
+    def build_fragment(
+        self,
+        cool_frequency_default=RB_COOL_DDS_FREQ_MHZ_MOT*MHz,
+        repump_frequency_default=RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+        cool_dds_amp_default=RB_COOL_DDS_ASF_MOT,
+        repump_dds_amp_default=RB_REPUMP_DDS_ASF_MOT,
+        shutter_prefire_default=10*ms,
+    ):
         self.setattr_param("cool_frequency",
                            FloatParam,
                            "Cool light AOM drive frequency",
-                           RB_COOL_DDS_FREQ_MHZ_MOT*MHz,
+                           cool_frequency_default,
                            min=(110-50)*MHz, max=(110+50)*MHz)
         self.cool_frequency: FloatParamHandle
 
         self.setattr_param("repump_frequency",
                            FloatParam,
                            "Repump light AOM drive frequency",
-                           RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+                           repump_frequency_default,
                            min=(80-50)*MHz, max=(80+50)*MHz)
         self.repump_frequency: FloatParamHandle
 
         self.setattr_param("cool_dds_amp",
                            FloatParam,
                            "Cool light AOM DDS amp (0-1)",
-                           RB_COOL_DDS_ASF_MOT,
+                           cool_dds_amp_default,
                            min=0, max=1)
         self.cool_dds_amp: FloatParamHandle
 
         self.setattr_param("repump_dds_amp",
                            FloatParam,
                            "Repump light AOM DDS amp (0-1)",
-                           RB_REPUMP_DDS_ASF_MOT,
+                           repump_dds_amp_default,
                            min=0, max=1)
         self.repump_dds_amp: FloatParamHandle
         
         self.setattr_param("shutter_prefire",
                            FloatParam,
                            "How much time to allow for the shutter coming on, before turning the light on",
-                           10*ms,
+                           shutter_prefire_default,
                            min=0*ms, max=200*ms)
         self.shutter_prefire: FloatParamHandle
         
@@ -244,6 +303,7 @@ class RbLightService(Fragment):
     @kernel
     def device_setup(self):
         self.core.break_realtime()
+        # TODO: CHECK
         self.apply_dds_settings()
         self.turn_light_off_now(close_shutters=True)
 
@@ -286,32 +346,38 @@ class LowBFieldService(Fragment):
     the control drivers.
     """
 
-    def build_fragment(self):
+    def build_fragment(
+        self,
+        EW_setpoint_default=RB_EW_SHIMS_V_MOT*V,
+        UD_setpoint_default=RB_UD_SHIMS_V_MOT*V,
+        NS_setpoint_default=RB_NS_SHIMS_V_MOT*V,
+        quad_setpoint_default=RB_QUAD_V_MOT*V,
+    ):
         self.setattr_param("EW_setpoint",
                            FloatParam,
                            "E/W Shims servo setpoint voltage",
-                           RB_EW_SHIMS_V_MOT*V,
+                           EW_setpoint_default,
                            min=-10*V, max=+10*V)
         self.EW_setpoint: FloatParamHandle
 
         self.setattr_param("UD_setpoint",
                            FloatParam,
                            "U/D Shims servo setpoint voltage",
-                           RB_UD_SHIMS_V_MOT*V,
+                           UD_setpoint_default,
                            min=-10*V, max=+10*V)
         self.UD_setpoint: FloatParamHandle
         
         self.setattr_param("NS_setpoint",
                            FloatParam,
                            "N/S Shims servo setpoint voltage",
-                           RB_NS_SHIMS_V_MOT*V,
+                           NS_setpoint_default,
                            min=-10*V, max=+10*V)
         self.NS_setpoint: FloatParamHandle
 
         self.setattr_param("quad_setpoint",
                     FloatParam,
                     "Quad setpoint",
-                    RB_QUAD_V_MOT*V,
+                    quad_setpoint_default,
                     min=0*V,max=10*V
                     )
         self.quad_setpoint:FloatParamHandle
@@ -356,7 +422,7 @@ class RbMOTLoadService(Fragment):
     def load_mot_on(self):
         self.MOT_load_fields.set_setpoints()
         self.MOT_load_fields.turn_quad_on()
-        self.MOT_fluoresce.turn_light_on_now(pre_open_shutters=True)
+        self.MOT_fluoresce.turn_light_on_now(program_profile=True, pre_open_shutters=True)
 
     @kernel
     def load_mot_off(self):
@@ -386,6 +452,13 @@ class LoadRbMOTImage(ExpFragment):
                            min=0*s,max=10*s)
         self.exposure_time: FloatParamHandle
 
+        self.setattr_param("camera_timeout",
+                           FloatParam,
+                           "How long to wait for the camera image before erroring",
+                           5.0*s,
+                           min=1.0*ms,max=60.0*s)
+        self.camera_timeout: FloatParamHandle
+
         # Results
         self.setattr_result(
             "mot_image",
@@ -405,32 +478,29 @@ class LoadRbMOTImage(ExpFragment):
         self.ttl_camera_exposure: TTLOut
 
     def _configure_camera(self):
-        ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
-
-        with suppress(Exception):
-            self.andor_ctrl.abort_acquisition()
-
-        self.andor_ctrl.set_shutter(mode=5)
-        self.andor_ctrl.set_trigger_mode(7)   # external exposure
-        self.andor_ctrl.set_image_region(*ROI)
+        configure_andor_for_rb_single_image(self.andor_ctrl)
 
     def host_setup(self):
         super().host_setup()
         self._configure_camera()
 
     def host_cleanup(self):
-        with suppress(Exception):
-            self.andor_ctrl.abort_acquisition()
+        self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        self.andor_ctrl.disable_em_gain()
         super().host_cleanup()
 
     @rpc
     def camera_start_acquisition(self):
+        self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        self.andor_ctrl.prepare()
         self.andor_ctrl.start_acquisition()
 
     @rpc
-    def camera_wait_read_and_publish(self):
-        self.andor_ctrl.wait()
-        img = self.andor_ctrl.get_image16()
+    def camera_wait_read_and_publish(self, timeout_s):
+        try:
+            img = self.andor_ctrl.wait_get_image16(timeout_ms=int(1000.0 * timeout_s))
+        finally:
+            self.andor_ctrl.abort_acquisition(ignore_idle=True)
         self.mot_image.push(img)
         self.set_dataset("andor.image", img, broadcast=True)
 
@@ -451,10 +521,218 @@ class LoadRbMOTImage(ExpFragment):
         self.camera_start_acquisition()
         self.core.break_realtime()
         self.rtio_events()
-        self.camera_wait_read_and_publish()
+        self.camera_wait_read_and_publish(self.camera_timeout.get())
 
 
 LoadRbMOTImageExp = make_fragment_prepared_dashboard_scan_exp(
     LoadRbMOTImage,
+    max_rtio_underflow_retries=0,
+)
+
+
+class RbMolassesService(Fragment):
+    def build_fragment(self):
+        self.setattr_fragment(
+            "molasses_fields",
+            LowBFieldService,
+            RB_EW_SHIMS_V_MOLASSES*V,
+            RB_UD_SHIMS_V_MOLASSES*V,
+            RB_NS_SHIMS_V_MOLASSES*V,
+            0.0*V,
+        )
+        self.molasses_fields: LowBFieldService
+
+        self.setattr_fragment(
+            "molasses_light",
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_MOLASSES*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_MOLASSES,
+            RB_REPUMP_DDS_ASF_MOLASSES,
+        )
+        self.molasses_light: RbLightService
+
+    @kernel
+    def molasses_on(self):
+        self.molasses_fields.turn_quad_off()
+        self.molasses_fields.set_setpoints()
+        self.molasses_light.apply_dds_settings()
+
+class RbCoolingService(Fragment):
+    def build_fragment(self):
+        self.setattr_fragment(
+            "cooling_fields",
+            LowBFieldService,
+            RB_EW_SHIMS_V_IMAGING_COOLING*V,
+            RB_UD_SHIMS_V_IMAGING_COOLING*V,
+            RB_NS_SHIMS_V_IMAGING_COOLING*V,
+            0.0*V,
+        )
+        self.cooling_fields: LowBFieldService
+
+        self.setattr_fragment(
+            "cooling_light",
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_TWEEZER_COOLING,
+            RB_REPUMP_DDS_ASF_TWEEZER_COOLING,
+        )
+        self.cooling_light: RbLightService
+
+    @kernel
+    def cooling_on(self):
+        self.cooling_fields.set_setpoints()
+        self.cooling_light.apply_dds_settings()
+
+class RbTweezerImageService(Fragment):
+    def build_fragment(self):
+        self.setattr_fragment(
+            "imaging_light",
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_TWEEZER_IMAGE,
+            RB_REPUMP_DDS_ASF_TWEEZER_IMAGE,
+        )
+        self.imaging_light: RbLightService
+
+        self.setattr_param("exposure_time",
+                           FloatParam,
+                           "How long to expose the camera for",
+                           CAMERA_EXPOSURE_TIME,
+                           min=1.0*ms,max=1.0*s)
+        self.exposure_time: FloatParamHandle
+
+        self.setattr_device("ttl_camera_exposure")
+        self.ttl_camera_exposure: TTLOut
+
+    @kernel
+    def image_atoms(self,exposure_trigger=True):
+        self.imaging_light.apply_dds_settings()
+        self.ttl_camera_exposure.on() if exposure_trigger else self.ttl_camera_exposure.off()
+        delay(self.exposure_time.use())
+        self.ttl_camera_exposure.off()
+        self.imaging_light.turn_light_off_now(close_shutters=True)
+
+
+class LoadRbMOTToTweezersImage(ExpFragment):
+    def build_fragment(self):
+        self.setattr_fragment("known_hardware_state", KnownHardwareState)
+        self.known_hardware_state: KnownHardwareState
+
+        self.setattr_fragment("Rb_MOT_loader", RbMOTLoadService)
+        self.Rb_MOT_loader: RbMOTLoadService
+
+        self.setattr_fragment("Rb_molasses", RbMolassesService)
+        self.Rb_molasses: RbMolassesService
+
+        self.setattr_fragment("Rb_cooling", RbCoolingService)
+        self.Rb_cooling: RbCoolingService
+
+        self.setattr_fragment("tweezer_imager", RbTweezerImageService)
+        self.tweezer_imager: RbTweezerImageService
+
+        self.setattr_param("mot_hold_time",
+                           FloatParam,
+                           "How long to hold the MOT before transfer",
+                           0.5*s,
+                           min=1.0*ms,max=10.0*s)
+        self.mot_hold_time: FloatParamHandle
+
+        self.setattr_param("molasses_time",
+                           FloatParam,
+                           "How long to hold molasses settings before imaging",
+                           30.0*ms,
+                           min=0.0*ms,max=1.0*s)
+        self.molasses_time: FloatParamHandle
+
+        self.setattr_param("cooling_time",
+                           FloatParam,
+                           "How long to hold cooling settings before imaging",
+                           10.0*ms,
+                           min=0.0*ms,max=1.0*s)
+        self.cooling_time: FloatParamHandle
+
+        self.setattr_param("camera_timeout",
+                           FloatParam,
+                           "How long to wait for the camera image before erroring",
+                           5.0*s,
+                           min=1.0*ms,max=60.0*s)
+        self.camera_timeout: FloatParamHandle
+
+        self.setattr_result(
+            "tweezers_image",
+            ArrayChannel,
+            element_type="int",
+            shape=(512, 512),
+            dim_names=("y", "x"),
+            min=0,
+            max=65535,
+        )
+
+        self.setattr_device("core")
+        self.core: Core
+        self.setattr_device("andor_ctrl")
+
+        self.setattr_device("ttl_camera_exposure")
+        self.ttl_camera_exposure: TTLOut
+
+    def _configure_camera(self):
+        configure_andor_for_rb_single_image(self.andor_ctrl)
+
+    def host_setup(self):
+        super().host_setup()
+        self._configure_camera()
+
+    def host_cleanup(self):
+        self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        self.andor_ctrl.disable_em_gain()
+        super().host_cleanup()
+
+    @rpc
+    def camera_start_acquisition(self):
+        self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        self.andor_ctrl.prepare()
+        self.andor_ctrl.start_acquisition()
+
+    @rpc
+    def camera_wait_read_and_publish(self, timeout_s):
+        try:
+            img = self.andor_ctrl.wait_get_image16(timeout_ms=int(1000.0 * timeout_s))
+        finally:
+            self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        self.tweezers_image.push(img)
+        self.set_dataset("andor.image", img, broadcast=True)
+
+    @kernel
+    def rtio_events(self):
+        self.core.break_realtime()
+        delay(2*ms)
+        delay(self.Rb_MOT_loader.MOT_fluoresce.shutter_prefire.get())
+
+        self.Rb_MOT_loader.load_mot_on()
+        delay(self.mot_hold_time.use())
+
+        self.ttl_camera_exposure.on()
+        self.Rb_molasses.molasses_on()
+        delay(self.molasses_time.use())
+
+        self.Rb_cooling.cooling_on()
+        delay(self.cooling_time.use())
+
+        self.tweezer_imager.image_atoms(exposure_trigger=False)
+        self.ttl_camera_exposure.off()
+
+    @kernel
+    def run_once(self):
+        self.camera_start_acquisition()
+        self.core.break_realtime()
+        self.rtio_events()
+        self.camera_wait_read_and_publish(self.camera_timeout.get())
+
+
+LoadRbMOTToTweezersImageExp = make_fragment_prepared_dashboard_scan_exp(
+    LoadRbMOTToTweezersImage,
     max_rtio_underflow_retries=0,
 )
