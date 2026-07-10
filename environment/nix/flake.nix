@@ -77,6 +77,7 @@
           python-env
           artiq-lab-tmux
           nixpkgsPkgs.gtkwave
+          nixpkgsPkgs.libcanberra-gtk3
         ];
       shellHook = ''
         if [ -z "$SCRATCH_DIR" ]; then
@@ -86,6 +87,10 @@
 
         export QT_PLUGIN_PATH=${nixpkgsPkgs.qt5.qtbase}/${nixpkgsPkgs.qt5.qtbase.dev.qtPluginPrefix}
         export QML2_IMPORT_PATH=${nixpkgsPkgs.qt5.qtbase}/${nixpkgsPkgs.qt5.qtbase.dev.qtQmlPrefix}
+        # Keep matplotlib applets on Qt instead of auto-selecting a GTK backend.
+        export MPLBACKEND=qtagg
+        # GTK looks for modules under $GTK_PATH/modules.
+        export GTK_PATH=${nixpkgsPkgs.libcanberra-gtk3}/lib/gtk-3.0''${GTK_PATH:+:$GTK_PATH}
         export LD_LIBRARY_PATH=${runtimeLibs}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
         # Let CUDA-enabled Nix packages find the host NVIDIA driver without adding
