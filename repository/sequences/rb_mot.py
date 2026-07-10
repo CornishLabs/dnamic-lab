@@ -1,3 +1,5 @@
+import numpy as np
+
 from artiq.coredevice.ad9910 import AD9910
 from artiq.coredevice.core import Core
 from artiq.coredevice.suservo import Channel as SUServoChannel
@@ -18,6 +20,8 @@ from artiq.language.units import s
 
 from ndscan.define.fragment import ExpFragment
 from ndscan.define.fragment import Fragment
+from ndscan.define.default_analysis import AnalysisFeedback
+from ndscan.define.default_analysis import CustomAnalysis
 from ndscan.define.parameters import FloatParam
 from ndscan.define.parameters import FloatParamHandle
 from ndscan.define.result_channels import ArrayChannel
@@ -54,6 +58,106 @@ SHUTTER_PREFIRE = 10.0 * ms
 MOT_HOLD_TIME = 1.0 * s
 MOLASSES_TIME = 30.0 * ms
 COOLING_TIME = 10.0 * ms
+
+NUM_TWEEZER_ROIS = 5
+NUM_TWEEZER_ROI_GROUPS = 1
+TWEEZER_ROI_RESULT_SHAPE = (NUM_TWEEZER_ROI_GROUPS, NUM_TWEEZER_ROIS)
+TWEEZER_ROI_RESULT_DIM_NAMES = ("group", "roi")
+TWEEZER_ROIS_DATASET = "rb_mot.tweezer_rois"
+TWEEZER_ROI_THRESHOLDS_DATASET = "rb_mot.tweezer_roi_thresholds"
+TWEEZER_ROI_COUNTS_DATASET = "rb_mot.tweezer_roi_counts"
+TWEEZER_ROI_BRIGHT_DATASET = "rb_mot.tweezer_roi_bright"
+TWEEZER_ROI_PROBABILITY_RESULT = "tweezer_roi_bright_probability"
+TWEEZER_ROI_PROBABILITY_ERROR_RESULT = "tweezer_roi_bright_probability_error"
+TWEEZER_ROI_NUM_SHOTS_RESULT = "tweezer_roi_num_shots"
+TWEEZER_ROI_NUM_BRIGHT_RESULT = "tweezer_roi_num_bright"
+
+# These ROI bounds are Python-style half-open bounds: (y0, y1, x0, x1).
+# The extra outer list is the ROI "group" dimension expected by image_roi_applet.py.
+DEFAULT_TWEEZER_ROIS = (
+    (
+        (255, 258, 127, 130),
+        (242, 245, 127, 130),
+        (227, 230, 127, 130),
+        (213, 216, 127, 130),
+        (199, 202, 127, 130),
+    ),
+)
+
+# Integrated-count thresholds for the five ROIs. This deliberately starts
+# uncalibrated; set rb_mot.tweezer_roi_thresholds from real empty/loaded shots.
+DEFAULT_TWEEZER_ROI_THRESHOLDS = ((1.0e12, 1.0e12, 1.0e12, 1.0e12, 1.0e12),)
+
+
+def _get_tweezer_rois(owner):
+    try:
+        rois = owner.get_dataset(TWEEZER_ROIS_DATASET)
+    except KeyError:
+        rois = DEFAULT_TWEEZER_ROIS
+        owner.set_dataset(
+            TWEEZER_ROIS_DATASET,
+            rois,
+            broadcast=True,
+            persist=True,
+        )
+    return np.asarray(rois, dtype=np.int32)
+
+
+def _get_tweezer_roi_thresholds(owner):
+    try:
+        thresholds = owner.get_dataset(TWEEZER_ROI_THRESHOLDS_DATASET)
+    except KeyError:
+        thresholds = DEFAULT_TWEEZER_ROI_THRESHOLDS
+        owner.set_dataset(
+            TWEEZER_ROI_THRESHOLDS_DATASET,
+            thresholds,
+            broadcast=True,
+            persist=True,
+        )
+    thresholds = np.asarray(thresholds, dtype=np.float64)
+    if thresholds.shape == (NUM_TWEEZER_ROIS,):
+        thresholds = thresholds.reshape(TWEEZER_ROI_RESULT_SHAPE)
+    return thresholds
+
+
+def _ensure_tweezer_roi_datasets(owner):
+    owner.set_dataset(
+        TWEEZER_ROIS_DATASET,
+        _get_tweezer_rois(owner).tolist(),
+        broadcast=True,
+        persist=True,
+    )
+    owner.set_dataset(
+        TWEEZER_ROI_THRESHOLDS_DATASET,
+        _get_tweezer_roi_thresholds(owner).tolist(),
+        broadcast=True,
+        persist=True,
+    )
+
+
+def _sum_tweezer_rois(image, rois):
+    image = np.asarray(image)
+    return np.asarray(
+        [
+            [
+                np.sum(image[y0:y1, x0:x1], dtype=np.int64)
+                for y0, y1, x0, x1 in roi_group
+            ]
+            for roi_group in rois
+        ],
+        dtype=np.int64,
+    )
+
+
+def _estimate_binomial_probability(num_successes, num_shots):
+    if num_shots <= 0:
+        shape = np.shape(num_successes)
+        return np.zeros(shape, dtype=np.float64), np.full(shape, np.inf, dtype=np.float64)
+    probability = np.asarray(num_successes, dtype=np.float64) / float(num_shots)
+    error = np.sqrt(np.maximum(probability * (1.0 - probability), 0.0) / float(num_shots))
+    error = np.maximum(error, 0.5 / float(num_shots))
+    return probability, error
+
 
 def configure_andor_for_rb_single_image(andor_ctrl):
     """Apply the old Andor single-image profile used for Rb images."""
@@ -649,6 +753,7 @@ class LoadRbMOTImage(ExpFragment):
     def host_setup(self):
         super().host_setup()
         self._configure_camera()
+        _ensure_tweezer_roi_datasets(self)
 
     def host_cleanup(self):
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
@@ -840,6 +945,34 @@ class LoadRbMOTToTweezersImage(ExpFragment):
             min=0,
             max=65535,
         )
+        self.setattr_result(
+            "tweezer_roi_counts",
+            ArrayChannel,
+            "Integrated counts in each tweezer ROI",
+            element_type="int",
+            shape=TWEEZER_ROI_RESULT_SHAPE,
+            dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+            min=0,
+        )
+        self.setattr_result(
+            "tweezer_roi_bright",
+            ArrayChannel,
+            "Thresholded bright/loaded decision for each tweezer ROI",
+            element_type="int",
+            shape=TWEEZER_ROI_RESULT_SHAPE,
+            dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+            min=0,
+            max=1,
+        )
+        self.setattr_result(
+            "tweezer_roi_thresholds_applied",
+            ArrayChannel,
+            "Integrated-count thresholds applied to each tweezer ROI",
+            element_type="float",
+            shape=TWEEZER_ROI_RESULT_SHAPE,
+            dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+            min=0.0,
+        )
 
         self.setattr_device("core")
         self.core: Core
@@ -848,12 +981,87 @@ class LoadRbMOTToTweezersImage(ExpFragment):
         self.setattr_device("ttl_camera_exposure")
         self.ttl_camera_exposure: TTLOut
 
+    def get_default_analyses(self):
+        probability = ArrayChannel(
+            TWEEZER_ROI_PROBABILITY_RESULT,
+            "Per-ROI bright probability",
+            element_type="float",
+            shape=TWEEZER_ROI_RESULT_SHAPE,
+            dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+            min=0.0,
+            max=1.0,
+        )
+        return [
+            CustomAnalysis(
+                [],
+                self._analyse_tweezer_roi_statistics,
+                analysis_results=[
+                    probability,
+                    ArrayChannel(
+                        TWEEZER_ROI_PROBABILITY_ERROR_RESULT,
+                        "Per-ROI bright probability error",
+                        element_type="float",
+                        shape=TWEEZER_ROI_RESULT_SHAPE,
+                        dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+                        min=0.0,
+                        display_hints={"error_bar_for": probability.path},
+                    ),
+                    ArrayChannel(
+                        TWEEZER_ROI_NUM_SHOTS_RESULT,
+                        "Number of shots contributing to each ROI",
+                        element_type="int",
+                        shape=TWEEZER_ROI_RESULT_SHAPE,
+                        dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+                        min=0,
+                    ),
+                    ArrayChannel(
+                        TWEEZER_ROI_NUM_BRIGHT_RESULT,
+                        "Number of bright shots in each ROI",
+                        element_type="int",
+                        shape=TWEEZER_ROI_RESULT_SHAPE,
+                        dim_names=TWEEZER_ROI_RESULT_DIM_NAMES,
+                        min=0,
+                    ),
+                ],
+                online_fn=self._analyse_tweezer_roi_statistics,
+                online_analysis_identifier="tweezer_roi_statistics",
+            )
+        ]
+
+    def _analyse_tweezer_roi_statistics(self, axis_values, result_values, analysis_results):
+        del axis_values, analysis_results
+
+        bright = np.asarray(result_values[self.tweezer_roi_bright], dtype=np.int32)
+        if bright.size == 0:
+            num_bright = np.zeros(TWEEZER_ROI_RESULT_SHAPE, dtype=np.int32)
+            num_shots = 0
+        else:
+            bright = bright.reshape((-1, NUM_TWEEZER_ROI_GROUPS, NUM_TWEEZER_ROIS))
+            num_bright = np.sum(bright, axis=0, dtype=np.int32)
+            num_shots = bright.shape[0]
+
+        probability, probability_error = _estimate_binomial_probability(
+            num_bright,
+            num_shots,
+        )
+        shots_by_roi = np.full(TWEEZER_ROI_RESULT_SHAPE, num_shots, dtype=np.int32)
+
+        return AnalysisFeedback(
+            outputs={
+                TWEEZER_ROI_PROBABILITY_RESULT: probability,
+                TWEEZER_ROI_PROBABILITY_ERROR_RESULT: probability_error,
+                TWEEZER_ROI_NUM_SHOTS_RESULT: shots_by_roi,
+                TWEEZER_ROI_NUM_BRIGHT_RESULT: num_bright,
+            }
+        )
+
     def _configure_camera(self):
         configure_andor_for_rb_single_image(self.andor_ctrl)
 
     def host_setup(self):
         super().host_setup()
         self._configure_camera()
+        _ensure_tweezer_roi_datasets(self)
 
     def host_cleanup(self):
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
@@ -872,8 +1080,19 @@ class LoadRbMOTToTweezersImage(ExpFragment):
             img = self.andor_ctrl.wait_get_image16(timeout_ms=int(1000.0 * timeout_s))
         finally:
             self.andor_ctrl.abort_acquisition(ignore_idle=True)
+        rois = _get_tweezer_rois(self)
+        thresholds = _get_tweezer_roi_thresholds(self)
+        roi_counts = _sum_tweezer_rois(img, rois)
+        roi_bright = (roi_counts >= thresholds).astype(np.int32)
+
         self.tweezers_image.push(img)
+        self.tweezer_roi_counts.push(roi_counts)
+        self.tweezer_roi_bright.push(roi_bright)
+        self.tweezer_roi_thresholds_applied.push(thresholds)
+
         self.set_dataset("andor.image", img, broadcast=True)
+        self.set_dataset(TWEEZER_ROI_COUNTS_DATASET, roi_counts, broadcast=True)
+        self.set_dataset(TWEEZER_ROI_BRIGHT_DATASET, roi_bright, broadcast=True)
 
     @kernel
     def rtio_events(self):
@@ -893,7 +1112,6 @@ class LoadRbMOTToTweezersImage(ExpFragment):
         self.tweezer_imager.image_atoms(exposure_trigger=True)
         self.tweezer_tone.turn_off()
         delay(5*ms)
-        self.known_hardware_state.safe_state.set_safe()
 
     @kernel
     def run_once(self):
