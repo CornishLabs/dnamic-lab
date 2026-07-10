@@ -19,13 +19,13 @@ custom_controllers = {
             "core": "core",
         },
     },
-    "AWGTest4Ch": {
-        "type": "controller",
-        "host": "localhost",
-        "port": 4015,
-        "target_name": "awg",
-        "command": "/home/lab/artiq-files/dnamic-lab/ndsps/spectrum-awg/host/run_aqctl_spectrum_awg --serial-number 14926 --characterisation-lookup-str AWG_817_CALIB --sample-rate 625000000 --gpu  -vv -p {port} --bind {bind}",
-    },
+#     "AWGTest4Ch": {
+#         "type": "controller",
+#         "host": "localhost",
+#         "port": 4015,
+#         "target_name": "awg",
+#         "command": "/home/lab/artiq-files/dnamic-lab/ndsps/spectrum-awg/host/run_aqctl_spectrum_awg --serial-number 14926 --characterisation-lookup-str AWG_817_CALIB --sample-rate 625000000 --gpu  -vv -p {port} --bind {bind}",
+#     },
 }
 
 # Configuration of sim is set in .dax
