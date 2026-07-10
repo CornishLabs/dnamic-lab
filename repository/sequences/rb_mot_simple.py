@@ -1,7 +1,6 @@
 from artiq.coredevice.ad9910 import AD9910
 from artiq.coredevice.core import Core
-from artiq.coredevice.suservo import Channel as SUServoChannel
-from artiq.coredevice.suservo import SUServo
+from artiq.coredevice.suservo import Channel, SUServo
 from artiq.coredevice.ttl import TTLOut
 from artiq.coredevice.urukul import CPLD
 from artiq.coredevice.zotino import Zotino
@@ -100,7 +99,7 @@ class LoadRbMOTToTweezersImageSimple(EnvExperiment):
         # self.setattr_device("suservo0")
         # self.suservo0: SUServo
         # self.setattr_device("suservo0_ch0")
-        # self.suservo0_ch0: SUServoChannel
+        # self.suservo0_ch0: Channel
 
         self.setattr_device("andor_ctrl")
 

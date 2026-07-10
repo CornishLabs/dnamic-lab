@@ -1,5 +1,7 @@
 from artiq.coredevice.ad9910 import AD9910
 from artiq.coredevice.core import Core
+from artiq.coredevice.suservo import Channel as SUServoChannel
+from artiq.coredevice.suservo import SUServo
 from artiq.coredevice.ttl import TTLOut
 from artiq.coredevice.urukul import CPLD
 from artiq.coredevice.zotino import Zotino
@@ -24,17 +26,34 @@ from ndscan.runtime.api import make_fragment_prepared_dashboard_scan_exp
 
 
 DDS_ATTEN_DB = 8.0 # This is what we use across all DDS Channels
+TWEEZER_SUSERVO_FREQ = 80.0 * MHz
+TWEEZER_SUSERVO_ATTEN_DB = 8.0
+TWEEZER_SUSERVO_ADC_CHANNEL = 0
+TWEEZER_SUSERVO_PGIA_GAIN = 0
+TWEEZER_SUSERVO_TARGET_V = 1.15
+TWEEZER_SUSERVO_OFFSET = -TWEEZER_SUSERVO_TARGET_V * (
+    10.0 ** (TWEEZER_SUSERVO_PGIA_GAIN - 1)
+)
+TWEEZER_SUSERVO_KP = -1.8
+TWEEZER_SUSERVO_KI = -1_550_000.0
+TWEEZER_SUSERVO_GAIN_LIMIT = 0.0
+
 CAMERA_TEMP_C = -60
-CAMERA_GAIN = 10
+CAMERA_GAIN = 100
 CAMERA_OUTPUT_AMPLIFIER = 0
 CAMERA_AD_CHANNEL = 0
 CAMERA_HSSPEED_INDEX = 2
 CAMERA_VSSPEED_INDEX = 4
 CAMERA_PREAMP_GAIN_INDEX = 2  # Old preampgain=3 was a 1-based UI setting.
-CAMERA_EXPOSURE_TIME = 10.0 * ms
-CAMERA_FAST_EXT_TRIGGER = False
+CAMERA_EXPOSURE_TIME = 30.0 * ms
+CAMERA_TIMEOUT = 20.0 * s
+CAMERA_FAST_EXT_TRIGGER = True
 CAMERA_ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
 
+SHUTTER_PREFIRE = 10.0 * ms
+MOT_HOLD_TIME = 1.0 * s
+MOLASSES_TIME = 30.0 * ms
+COOLING_TIME = 10.0 * ms
 
 def configure_andor_for_rb_single_image(andor_ctrl):
     """Apply the old Andor single-image profile used for Rb images."""
@@ -58,7 +77,7 @@ def configure_andor_for_rb_single_image(andor_ctrl):
 
 # MOT stage good values
 RB_COOL_DDS_FREQ_MHZ_MOT = 101.25
-RB_COOL_DDS_ASF_MOT = 0.45
+RB_COOL_DDS_ASF_MOT = 0.48
 RB_REPUMP_DDS_FREQ_MHZ_MOT = 80.64
 RB_REPUMP_DDS_ASF_MOT = 0.32
 RB_EW_SHIMS_V_MOT = -0.367 # -0.406
@@ -110,12 +129,31 @@ class HardwareInitOnce(Fragment):
         self.setattr_device("zotino0")
         self.zotino0: Zotino
 
+        # SUServo
+        self.setattr_device("suservo0")
+        self.suservo0: SUServo
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
+
         # Local variables
         self._needs_hardware_init = True
     
     def host_setup(self):
         super().host_setup()
-        
+
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
+
+        kernel_invariants = getattr(self, "kernel_invariants", set())
+        self.kernel_invariants = kernel_invariants | {
+            "suservo0",
+            "suservo0_ch0",
+            "suservo_profile",
+            "suservo_attenuator_channel",
+            "suservo_cpld",
+        }
+
         # ndscan calls host_setup after a scheduler pause is eventually resumed.
         # This will invalidate the init state and cause a reinitialisation.
         # This is probably unnecessary as it is unlikely a seperate experiment will
@@ -134,11 +172,12 @@ class HardwareInitOnce(Fragment):
 
         # Core
         self.core.reset() # (also does break realtime)
+        delay(10.0 * ms)
 
         # DDSs
         self.dds_cpld_rb.init()
         # I am not entirely sure why, but these DDS initialisations need more
-        # lack.
+        # slack.
         ## Maybe the channel initialisations wait an indeterminate amount of time 
         #    due to a PLL lock check, so break_realtime afterwords to stop
         #    pseudorandom RTIOUnderflow.
@@ -152,6 +191,46 @@ class HardwareInitOnce(Fragment):
 
         # DAC
         self.zotino0.init()
+
+        # SUServos
+        self.core.break_realtime()
+        self.suservo0.init()
+        self.core.break_realtime()
+        delay(1.0 * ms)
+
+        self.suservo0.set_config(enable=0)
+        self.suservo0.set_pgia_mu(
+            TWEEZER_SUSERVO_ADC_CHANNEL,
+            TWEEZER_SUSERVO_PGIA_GAIN,
+        )
+        self.suservo_cpld.set_att(
+            self.suservo_attenuator_channel,
+            TWEEZER_SUSERVO_ATTEN_DB,
+        )
+        self.suservo0_ch0.set_iir(
+            profile=self.suservo_profile,
+            adc=TWEEZER_SUSERVO_ADC_CHANNEL,
+            kp=TWEEZER_SUSERVO_KP,
+            ki=TWEEZER_SUSERVO_KI,
+            g=TWEEZER_SUSERVO_GAIN_LIMIT,
+        )
+        self.suservo0_ch0.set_dds(
+            profile=self.suservo_profile,
+            frequency=TWEEZER_SUSERVO_FREQ,
+            offset=TWEEZER_SUSERVO_OFFSET,
+        )
+        self.suservo0_ch0.set_y( # Set integrator (output) to zero
+            profile=self.suservo_profile,
+            y=0.0,
+        )
+        self.suservo0_ch0.set(
+            en_out=0, # RF switch off
+            en_iir=0, # IIR integrator updates off (unservoed)
+            profile=self.suservo_profile,
+        )
+
+        self.suservo0.set_config(enable=1) # Enable SUServo write cycle
+        self.core.break_realtime()
 
 
 class SafeHardwareState(Fragment):
@@ -183,6 +262,29 @@ class SafeHardwareState(Fragment):
         self.setattr_device("zotino0")
         self.zotino0: Zotino
 
+        # SUServo
+        self.setattr_device("suservo0")
+        self.suservo0: SUServo
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
+
+    def host_setup(self):
+        super().host_setup()
+
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
+
+        kernel_invariants = getattr(self, "kernel_invariants", set())
+        self.kernel_invariants = kernel_invariants | {
+            "suservo0",
+            "suservo0_ch0",
+            "suservo_profile",
+            "suservo_attenuator_channel",
+            "suservo_cpld",
+        }
+
+
     @kernel
     def set_safe(self):
         self.core.break_realtime()
@@ -199,8 +301,21 @@ class SafeHardwareState(Fragment):
             [0, 1, 2, 3],
         )
 
+        delay(1*ms)
         self.dds_ch_rb_cool.set_att(DDS_ATTEN_DB)
         self.dds_ch_rb_repump.set_att(DDS_ATTEN_DB)
+
+        self.suservo0.set_config(enable=0)
+        self.suservo0_ch0.set_y( # Set integrator (output) to zero
+            profile=self.suservo_profile,
+            y=0.0,
+        )
+        self.suservo0_ch0.set(
+            en_out=0, # RF switch off
+            en_iir=0, # IIR integrator updates off (unservoed)
+            profile=self.suservo_profile,
+        )
+        self.suservo0.set_config(enable=1) # Enable SUServo write cycle
 
     @kernel
     def device_setup(self):
@@ -230,6 +345,60 @@ class KnownHardwareState(Fragment):
     # stage fragments can apply their per-point settings after the safe state.
 
 
+class TweezerSUServoToneService(Fragment):
+    """Servoed SU-Servo channel 0 output used as the tweezer RF drive."""
+
+    def build_fragment(self):
+        self.setattr_device("core")
+        self.core: Core
+
+        self.setattr_device("suservo0")
+        self.suservo0: SUServo
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
+
+    def host_setup(self):
+        super().host_setup()
+
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
+
+        kernel_invariants = getattr(self, "kernel_invariants", set())
+        self.kernel_invariants = kernel_invariants | {
+            "suservo0",
+            "suservo0_ch0",
+            "suservo_profile",
+            "suservo_attenuator_channel",
+            "suservo_cpld",
+        }
+
+    @kernel
+    def turn_on(self):
+        self.suservo0_ch0.set(
+            en_out=0,
+            en_iir=0,
+            profile=self.suservo_profile,
+        )
+        self.suservo0_ch0.set_y(
+            profile=self.suservo_profile,
+            y=0.0,
+        )
+        self.suservo0_ch0.set(
+            en_out=1,
+            en_iir=1,
+            profile=self.suservo_profile,
+        )
+
+    @kernel
+    def turn_off(self):
+        self.suservo0_ch0.set(
+            en_out=0,
+            en_iir=0,
+            profile=self.suservo_profile,
+        )
+
+
 class RbLightService(Fragment):
 
     def build_fragment(
@@ -238,7 +407,7 @@ class RbLightService(Fragment):
         repump_frequency_default=RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
         cool_dds_amp_default=RB_COOL_DDS_ASF_MOT,
         repump_dds_amp_default=RB_REPUMP_DDS_ASF_MOT,
-        shutter_prefire_default=10*ms,
+        shutter_prefire_default=SHUTTER_PREFIRE,
     ):
         self.setattr_param("cool_frequency",
                            FloatParam,
@@ -310,20 +479,16 @@ class RbLightService(Fragment):
     @kernel
     def turn_light_on_now(self, program_profile=False, pre_open_shutters=True):
         """
-        Turn the cool+repump beams on `now`. This function will open the requisite shutters (if asked)
-        and RF switches. It writes shutter events in the past, so be sure to have enough slack for this.
+        Turn the cool+repump beams on. This function opens the requisite shutters
+        first, waits for the shutter prefire time, and then enables the RF switches.
         """
+        if program_profile:
+            self.apply_dds_settings()
         if pre_open_shutters:
-            # Write shutter open into the past.
-            # You must have sufficient slack for this to work.
             shutter_prefire = self.shutter_prefire.get()
-            delay(-shutter_prefire) # This doesn't actually wait, just moves the cursor
             self.ttl_rb_cool_shut.on()
             self.ttl_rb_repump_shut.on()
             delay(shutter_prefire)
-            # cursor is now back where this was called.
-        if program_profile:
-            self.apply_dds_settings()
         # If the switch was already on, this a Noop
         self.dds_ch_rb_cool.sw.on()
         self.dds_ch_rb_repump.sw.on()
@@ -420,9 +585,10 @@ class RbMOTLoadService(Fragment):
 
     @kernel
     def load_mot_on(self):
+        self.MOT_fluoresce.apply_dds_settings()
         self.MOT_load_fields.set_setpoints()
         self.MOT_load_fields.turn_quad_on()
-        self.MOT_fluoresce.turn_light_on_now(program_profile=True, pre_open_shutters=True)
+        self.MOT_fluoresce.turn_light_on_now(program_profile=False, pre_open_shutters=True)
 
     @kernel
     def load_mot_off(self):
@@ -455,7 +621,7 @@ class LoadRbMOTImage(ExpFragment):
         self.setattr_param("camera_timeout",
                            FloatParam,
                            "How long to wait for the camera image before erroring",
-                           5.0*s,
+                           CAMERA_TIMEOUT,
                            min=1.0*ms,max=60.0*s)
         self.camera_timeout: FloatParamHandle
 
@@ -507,14 +673,13 @@ class LoadRbMOTImage(ExpFragment):
     @kernel
     def rtio_events(self):
         self.core.break_realtime()
-        # Add enough slack for Zotino set_dac() and the shutter prefire event.
-        delay(2 * ms)
-        delay(self.Rb_MOT_loader.MOT_fluoresce.shutter_prefire.get())
+        delay(20.0 * ms)
         
         self.Rb_MOT_loader.load_mot_on()
         delay(self.Rb_MOT_preload_time.get())
         self.ttl_camera_exposure.pulse(self.exposure_time.get())
         self.Rb_MOT_loader.load_mot_off()
+        self.known_hardware_state.safe_state.set_safe()
     
     @kernel
     def run_once(self):
@@ -554,9 +719,11 @@ class RbMolassesService(Fragment):
 
     @kernel
     def molasses_on(self):
-        self.molasses_fields.turn_quad_off()
         self.molasses_fields.set_setpoints()
+        delay(0.5*ms)
         self.molasses_light.apply_dds_settings()
+        delay(0.5*ms)
+        self.molasses_fields.turn_quad_off()
 
 class RbCoolingService(Fragment):
     def build_fragment(self):
@@ -621,6 +788,9 @@ class LoadRbMOTToTweezersImage(ExpFragment):
         self.setattr_fragment("known_hardware_state", KnownHardwareState)
         self.known_hardware_state: KnownHardwareState
 
+        self.setattr_fragment("tweezer_tone", TweezerSUServoToneService)
+        self.tweezer_tone: TweezerSUServoToneService
+
         self.setattr_fragment("Rb_MOT_loader", RbMOTLoadService)
         self.Rb_MOT_loader: RbMOTLoadService
 
@@ -636,28 +806,28 @@ class LoadRbMOTToTweezersImage(ExpFragment):
         self.setattr_param("mot_hold_time",
                            FloatParam,
                            "How long to hold the MOT before transfer",
-                           0.5*s,
+                           MOT_HOLD_TIME,
                            min=1.0*ms,max=10.0*s)
         self.mot_hold_time: FloatParamHandle
 
         self.setattr_param("molasses_time",
                            FloatParam,
                            "How long to hold molasses settings before imaging",
-                           30.0*ms,
+                           MOLASSES_TIME,
                            min=0.0*ms,max=1.0*s)
         self.molasses_time: FloatParamHandle
 
         self.setattr_param("cooling_time",
                            FloatParam,
                            "How long to hold cooling settings before imaging",
-                           10.0*ms,
+                           COOLING_TIME,
                            min=0.0*ms,max=1.0*s)
         self.cooling_time: FloatParamHandle
 
         self.setattr_param("camera_timeout",
                            FloatParam,
                            "How long to wait for the camera image before erroring",
-                           5.0*s,
+                           CAMERA_TIMEOUT,
                            min=1.0*ms,max=60.0*s)
         self.camera_timeout: FloatParamHandle
 
@@ -708,21 +878,22 @@ class LoadRbMOTToTweezersImage(ExpFragment):
     @kernel
     def rtio_events(self):
         self.core.break_realtime()
-        delay(2*ms)
-        delay(self.Rb_MOT_loader.MOT_fluoresce.shutter_prefire.get())
+        delay(20.0 * ms)
 
+        self.tweezer_tone.turn_on()
         self.Rb_MOT_loader.load_mot_on()
         delay(self.mot_hold_time.use())
 
-        self.ttl_camera_exposure.on()
         self.Rb_molasses.molasses_on()
         delay(self.molasses_time.use())
 
         self.Rb_cooling.cooling_on()
         delay(self.cooling_time.use())
 
-        self.tweezer_imager.image_atoms(exposure_trigger=False)
-        self.ttl_camera_exposure.off()
+        self.tweezer_imager.image_atoms(exposure_trigger=True)
+        self.tweezer_tone.turn_off()
+        delay(5*ms)
+        self.known_hardware_state.safe_state.set_safe()
 
     @kernel
     def run_once(self):

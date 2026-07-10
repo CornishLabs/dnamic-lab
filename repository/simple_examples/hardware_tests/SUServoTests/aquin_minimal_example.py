@@ -27,7 +27,7 @@ class SUServoMinimal(EnvExperiment):
         self.suservo0.cplds[0].set_att(0, A)   # set attenuation on Urukul channel 0 to 0
         
         # Set physical parameters
-        v_t = 1.12                             # target input voltage (V) for Sampler channel
+        v_t = 1.15                             # target input voltage (V) for Sampler channel
         f = 80_000_000.0                       # frequency (Hz) of Urukul output
         
         o = -v_t*(10.0**(g-1))                 # offset to assign to servo to reach target voltage
