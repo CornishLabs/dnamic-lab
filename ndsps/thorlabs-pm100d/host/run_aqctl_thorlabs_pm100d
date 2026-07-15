@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Keep this controller's hardware dependencies isolated from active ARTIQ and
+# controller-manager environments. The override remains useful for deployment
+# on another host, but the safe default is the venv beside this script.
+VENV="${THORLABS_PM100D_VENV:-$SCRIPT_DIR/.venv}"
+PY="$VENV/bin/python"
+
+# Do not accidentally import packages from whichever ARTIQ/Nix environment
+# happened to launch artiq_ctlmgr.
+unset PYTHONPATH PYTHONHOME VIRTUAL_ENV
+
+exec "$PY" -m dnamic_thorlabs_pm100d_host.aqctl_thorlabs_pm100d "$@"

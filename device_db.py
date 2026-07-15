@@ -2,6 +2,17 @@ from device_db_generated import device_db as ddb_gen
 from aliases import aliases
 
 custom_controllers = {
+    "powermeter": {
+        "type": "controller",
+        "host": "localhost",
+        "port": 4020,
+        "target_name": "powermeter",
+        "command": (
+            "/home/lab/artiq-files/dnamic-lab/ndsps/thorlabs-pm100d/host/"
+            "run_aqctl_thorlabs_pm100d -v -p {port} --bind {bind} "
+            "--resource USB0::4883::32888::P0011587::0::INSTR"
+        ),
+    },
     "andor_ctrl": {
         "type": "controller",
         "host": "localhost",

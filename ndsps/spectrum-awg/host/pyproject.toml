@@ -20,7 +20,7 @@ aqctl_spectrum_awg = "spectrum_awg_host.aqctl_spectrum_awg:main"
 
 [tool.uv.sources]
 sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
-awgsegmentfactory = { path = "../../../../../code/AWGSegmentFactory", editable = true }
+awgsegmentfactory = { path = "../../../../../code/awg-segment-factory", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.9.11,<0.10.0"]

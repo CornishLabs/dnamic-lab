@@ -7,6 +7,7 @@ dependencies = [
     "artiq-comtools",
     "dnamic-andor-host",
     "spectrum-awg-host",
+    "dnamic-thorlabs-pm100d-host",
     "numpy>=2.4.0",
     "pybase64>=1.4.3",
     "sipyco",
@@ -20,3 +21,4 @@ artiq-comtools = { git = "https://git.m-labs.hk/M-Labs/artiq-comtools.git" }
 sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
 dnamic-andor-host = { path = "../../ndsps/andor-camera/host" , editable = true}
 spectrum-awg-host = { path = "../../ndsps/spectrum-awg/host" , editable = true}
+dnamic-thorlabs-pm100d-host = { path = "../../ndsps/thorlabs-pm100d/host", editable = true }

@@ -1,0 +1,23 @@
+[project]
+name = "dnamic-thorlabs-pm100d-host"
+version = "0.1.0"
+description = "Host-side SiPyCo controller for a Thorlabs PM100D power meter"
+requires-python = ">=3.13"
+dependencies = [
+    "pyvisa>=1.16.2",
+    "pyvisa-py[usb]>=0.8.1",
+    "sipyco",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.14.0"]
+
+[project.scripts]
+aqctl_thorlabs_pm100d = "dnamic_thorlabs_pm100d_host.aqctl_thorlabs_pm100d:main"
+
+[tool.uv.sources]
+sipyco = { git = "https://git.m-labs.hk/M-Labs/sipyco.git" }
+
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
