@@ -167,8 +167,15 @@ class ImageWithROIs(pg.ImageView):
 
         vb = self.getView()
 
-        # Build from scratch if list length changed
-        rebuild = (len(self._roi_items) != len(rois))
+        # Build from scratch if either the number of groups *or the number of ROIs in
+        # any group changed.  Comparing only the outer length is insufficient: both
+        # the Cs and Rb layouts have one group, but they contain nine and five ROIs
+        # respectively.  In that case an in-place update would move ROIs 0--4 while
+        # accidentally leaving the four old Cs graphics on screen.
+        rebuild = len(self._roi_items) != len(rois) or any(
+            len(items) != len(roi_g)
+            for items, roi_g in zip(self._roi_items, rois)
+        )
         if rebuild:
             self._clear_roi_items()
             for gi, roi_g in enumerate(rois):
