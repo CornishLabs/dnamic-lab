@@ -1,6 +1,7 @@
 from artiq.language.core import kernel
 from artiq.language.environment import BooleanValue
 from artiq.language.environment import EnvExperiment
+from artiq.language.environment import EnumerationValue
 from artiq.language.environment import NumberValue
 from artiq.language.units import MHz
 
@@ -42,14 +43,11 @@ class SUServoConstantRF(EnvExperiment):
         )
         self.setattr_argument(
             "channel",
-            NumberValue(
-                default=0,
-                step=1,
-                min=0,
-                max=7,
-                precision=0,
-                type="int",
+            EnumerationValue(
+                [str(index) for index in range(8)],
+                default="0",
             ),
+            tooltip="SU-Servo channel index 0-7.",
         )
         self.setattr_argument("rf_switch_on", BooleanValue(True))
 
