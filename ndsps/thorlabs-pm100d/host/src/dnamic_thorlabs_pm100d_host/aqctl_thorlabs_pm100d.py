@@ -33,7 +33,7 @@ def get_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--averages",
         type=int,
-        default=1_000,
+        default=100,
         help="meter samples averaged per reading (default: %(default)s)",
     )
     return parser
