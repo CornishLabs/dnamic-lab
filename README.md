@@ -3,6 +3,11 @@ Durham Neutral Atom and Molecule Improved Control. Primarily Artiq code for expe
 
 The wiki/docs stores my questions, musings, and documentation for future people who go on this journey.
 
+The intended structure and lifecycle of reusable experiment sequences is documented in
+[repository/sequences/README.md](repository/sequences/README.md). Existing sequence
+files span several generations of design, so consult that document before choosing a
+pattern to copy.
+
 ## Python environments
 
 There are two Python environments in use:
