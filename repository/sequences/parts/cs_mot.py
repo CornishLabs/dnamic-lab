@@ -4,6 +4,24 @@ This module deliberately contains no complete experiment or result analysis.  A 
 passes the globally owned ``LabRTIOHardware`` instance to the parts here as a non-owning
 reference.  Stage settings remain separate and independently scannable even though the
 stages act on the same physical devices.
+
+Runtime convention
+------------------
+
+* A parameter-only ``*Settings`` fragment declares values but performs no action.
+  The stage containing it must consume every one of those values.
+* A stage's ``run(...)`` method performs the complete timed stage, including its own
+  ``duration``. A composition chooses ordering but never delays on behalf of a child.
+  RTIO outputs remain latched afterwards; returning from ``run(...)`` does not restore
+  the previous hardware state.
+* Boolean arguments describe non-scannable composition choices, such as whether the
+  resonant light must be turned on at entry or off at exit. Call sites spell these out
+  by keyword so the relevant hardware state is visible in the higher-order sequence.
+* State contracts use ``Requires``, ``During`` and ``Leaves`` sections. Directional
+  method names are reserved for cases which cannot be expressed clearly as options.
+* Stages use a shared hardware helper for calibrated, timed, atomic or coordinated
+  operations. A transparent one-device action remains visible at the stage, for
+  example ``hardware.ttl_camera_exposure.on()``.
 """
 
 from dataclasses import dataclass
@@ -35,6 +53,7 @@ MOLASSES_TIME = 35.0 * ms
 COOLING_TIME = 10.0 * ms
 SPILL_TIME = 20.0 * ms
 DROP_TIME = 100.0 * us
+
 
 @dataclass(frozen=True)
 class LightDefaults:
@@ -268,7 +287,7 @@ class CoolingShimSettings(_ShimSettings):
 
 
 class CsMOTStage(UsesLabRTIOHardware):
-    """Establish the MOT state from the safe per-point hardware state."""
+    """Establish and hold one parameterised Cs MOT state."""
 
     # Subclasses can specialise a complete stage without changing the ordinary
     # one-stage MOT defaults used elsewhere.
@@ -307,17 +326,6 @@ class CsMOTStage(UsesLabRTIOHardware):
         )
         self.tweezer_setpoint: FloatParamHandle
 
-        self.shutter_prefire = self.setattr_param(
-            "shutter_prefire",
-            FloatParam,
-            "Time between opening the Cs shutters and enabling RF",
-            SHUTTER_PREFIRE,
-            min=0.0 * ms,
-            max=200.0 * ms,
-            unit="ms"
-        )
-        self.shutter_prefire: FloatParamHandle
-
         self.duration = self.setattr_param(
             "duration",
             FloatParam,
@@ -330,12 +338,11 @@ class CsMOTStage(UsesLabRTIOHardware):
         self.duration: FloatParamHandle
 
     @kernel
-    def apply_settings(self):
+    def _apply_settings(self):
         """Apply this stage while the Cs light path and tweezer servo stay active.
 
-        This is the useful transition between adjacent MOT stages: it changes every
-        parameter which defines the stage without closing and reopening shutters or
-        restarting the tweezer servo.  The caller is responsible for the timed hold.
+        This private helper contains only the common parameter application. ``run()``
+        owns the entry choices and timed hold.
         """
         self.hardware.set_cs_tweezer_setpoint(self.tweezer_setpoint.use())
         self.hardware.program_cs_light(
@@ -350,15 +357,39 @@ class CsMOTStage(UsesLabRTIOHardware):
             self.shims.ns_setpoint.use(),
             self.quad_setpoint.use(),
         )
-        self.hardware.turn_quad_on()
+        self.hardware.ttl_quad.on()
 
     @kernel
-    def establish(self):
-        """Establish the same MOT state, in the same order, as ``cs_mot.py``."""
-        # Preserve the existing order: enable the servo before changing its target.
-        self.hardware.set_cs_tweezer_servo_enabled(1)
-        self.apply_settings()
-        self.hardware.turn_cs_light_on(self.shutter_prefire.use())
+    def run(self, turn_tweezer_servo_on, turn_light_on, shutter_prefire):
+        """Establish and hold this complete MOT stage.
+
+        Requires:
+            If ``turn_tweezer_servo_on`` is false, the 1066 nm servo is already
+            enabled. If ``turn_light_on`` is false, the Cs shutters and RF switches
+            are already on. ``shutter_prefire`` is used only when turning light on.
+
+        During:
+            Applies every MOT light, field, quadrupole, and tweezer setting, then waits
+            for ``duration`` with the quadrupole TTL on.
+
+        Leaves:
+            The 1066 nm servo, Cs cooling and repump light, MOT fields, and quadrupole
+            TTL on at this stage's settings. Nothing is restored or turned off when
+            this method returns.
+        """
+        if turn_tweezer_servo_on:
+            # Preserve the established Cs ordering: enable the servo before changing
+            # its target.
+            self.hardware.set_cs_tweezer_servo_enabled(1)
+
+        self._apply_settings()
+
+        if turn_light_on:
+            self.hardware.turn_cs_light_on(shutter_prefire)
+
+        delay(self.duration.use())
+        # There is deliberately no exit action here: RTIO outputs latch, so the full
+        # MOT state remains active for the following transition.
 
 
 class CsBulkMOTStage(CsMOTStage):
@@ -382,12 +413,7 @@ class CsCompressedMOTStage(CsMOTStage):
 
 
 class CsMolassesStage(UsesLabRTIOHardware):
-    """Differential MOT -> molasses transition.
-
-    Requires the light shutters and RF switches to remain on from
-    :meth:`CsMOTStage.establish`.  It guarantees a zero quad demand and then disables
-    the quad TTL after reproducing the two original 0.5 ms settling delays.
-    """
+    """Transition from an active Cs MOT into a timed molasses state."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -407,19 +433,40 @@ class CsMolassesStage(UsesLabRTIOHardware):
         self.duration: FloatParamHandle
 
     @kernel
-    def enter_from_mot(self):
+    def run(self, turn_light_off):
+        """Enter from an active MOT, hold, and choose the exit light state.
+
+        Requires:
+            The Cs shutters and cooling/repump RF switches are already on, normally
+            from :meth:`CsMOTStage.run`.
+
+        During:
+            Programs the molasses light and shim settings, sets the analogue
+            quadrupole demand to zero, disables the quadrupole TTL, and waits for
+            ``duration``.
+
+        Leaves:
+            The molasses shim settings active, analogue quadrupole demand at zero, and
+            quadrupole TTL off. The 1066 nm servo is unchanged. Cs light is off only
+            when ``turn_light_off`` is true; otherwise it remains on at the molasses
+            settings. No previous hardware state is restored automatically.
+        """
         self.hardware.program_cs_light(
             self.light.cool_frequency.use(),
             self.light.repump_frequency.use(),
             self.light.cool_dds_amp.use(),
             self.light.repump_dds_amp.use(),
         )
-        self.hardware.turn_quad_off()
+        self.hardware.ttl_quad.off()
         self.hardware.set_fields_with_quad_demand_off(
             self.shims.ew_setpoint.use(),
             self.shims.ud_setpoint.use(),
             self.shims.ns_setpoint.use(),
         )
+        delay(self.duration.use())
+
+        if turn_light_off:
+            self.hardware.turn_cs_light_off()
 
 
 class CsCoolingStage(UsesLabRTIOHardware):
@@ -459,15 +506,23 @@ class CsCoolingStage(UsesLabRTIOHardware):
 
     @kernel
     def run(self, turn_light_on, turn_light_off):
-        """Establish this cooling profile, hold it for ``duration``, then return.
+        """Establish and hold this cooling profile.
 
-        With ``turn_light_on=True``, both Cs shutters are opened, the shutter prefire
-        elapses, and cooling and repump RF are enabled before the timed interval.
-        Otherwise the shutters and RF must already be on, as they are immediately
-        after the molasses stage.
+        Requires:
+            The 1066 nm servo is already enabled. If ``turn_light_on`` is false, both
+            Cs shutters and cooling/repump RF switches are already on, normally from
+            molasses.
 
-        With ``turn_light_off=True``, both RF paths are disabled and both shutters are
-        closed afterwards. Otherwise the light remains on for the next operation.
+        During:
+            Applies every cooling light, shim, and tweezer setting, ensures the
+            quadrupole demand and TTL are off, optionally opens the light path, and
+            waits for ``duration``. Shutter prefire time is outside ``duration``.
+
+        Leaves:
+            The 1066 nm servo enabled at ``tweezer_setpoint``, the cooling shim
+            settings active, and the quadrupole demand and TTL off. Cs light is off
+            only when ``turn_light_off`` is true; otherwise it remains on at the
+            cooling settings. No previous hardware state is restored automatically.
         """
         self.hardware.set_cs_tweezer_setpoint(self.tweezer_setpoint.use())
         self.hardware.set_fields_with_quad_demand_off(
@@ -484,7 +539,7 @@ class CsCoolingStage(UsesLabRTIOHardware):
 
         # Cooling never uses the quadrupole field. The analogue demand was set to zero
         # above before disabling its TTL, preserving the established hardware order.
-        self.hardware.turn_quad_off()
+        self.hardware.ttl_quad.off()
 
         if turn_light_on:
             self.hardware.turn_cs_light_on(SHUTTER_PREFIRE)
@@ -498,7 +553,7 @@ class CsCoolingStage(UsesLabRTIOHardware):
 
 
 class CsImagingStage(UsesLabRTIOHardware):
-    """Image atoms, assuming cooling light is already on and shutters are open."""
+    """Take one exposure using the parameterised Cs imaging light."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -516,17 +571,35 @@ class CsImagingStage(UsesLabRTIOHardware):
         self.exposure_time: FloatParamHandle
 
     @kernel
-    def enter_from_cooling(self):
+    def run(self, turn_light_off):
+        """Program imaging light, expose, and choose the light exit state.
+
+        Requires:
+            The Cs shutters and cooling/repump RF switches are already on, and the
+            camera is ready to accept an exposure trigger.
+
+        During:
+            Programs the imaging light, holds the camera-exposure TTL high for
+            ``exposure_time``, then lowers the TTL.
+
+        Leaves:
+            The camera-exposure TTL off. Tweezer and field settings are unchanged. Cs
+            light is off only when ``turn_light_off`` is true; otherwise it remains on
+            at the imaging settings. No previous hardware state is restored
+            automatically.
+        """
         self.hardware.program_cs_light(
             self.light.cool_frequency.use(),
             self.light.repump_frequency.use(),
             self.light.cool_dds_amp.use(),
             self.light.repump_dds_amp.use(),
         )
-        self.hardware.start_camera_exposure()
+        self.hardware.ttl_camera_exposure.on()
         delay(self.exposure_time.use())
-        self.hardware.stop_camera_exposure()
-        self.hardware.turn_cs_light_off()
+        self.hardware.ttl_camera_exposure.off()
+
+        if turn_light_off:
+            self.hardware.turn_cs_light_off()
 
 
 # -----------------------------------------------------------------------------
@@ -535,12 +608,7 @@ class CsImagingStage(UsesLabRTIOHardware):
 
 
 class LoadCsMOTToTweezers(UsesLabRTIOHardware):
-    """Load a Cs MOT and perform the differential transition to molasses.
-
-    Ensures that the tweezer servo and Cs light remain on, the quad is off, and the
-    molasses field/light settings are active.  This is the state expected by
-    :class:`CoolAndImageCsAtoms` below.
-    """
+    """Load a Cs MOT and transition into molasses."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -549,20 +617,44 @@ class LoadCsMOTToTweezers(UsesLabRTIOHardware):
         self.setattr_fragment("molasses", CsMolassesStage, hardware=hardware)
         self.molasses: CsMolassesStage
 
-    @kernel
-    def run(self):
-        """Holds mot stage for duration, then switches to holding molasses, leaving cursor after
-        molasses time is up. BUT does not turn the cool/repump light off after."""
-        self.mot.establish()
-        delay(self.mot.duration.use())
-        self.molasses.enter_from_mot()
-        delay(self.molasses.duration.use())
+        # Shutter prefire describes entry into the complete loading operation. It is
+        # not a property of every MOT stage (in particular, a compressed stage entered
+        # from an active MOT must not expose an unused copy).
+        self.shutter_prefire = self.setattr_param(
+            "shutter_prefire",
+            FloatParam,
+            "Time between opening the Cs shutters and enabling RF",
+            SHUTTER_PREFIRE,
+            min=0.0 * ms,
+            max=200.0 * ms,
+            unit="ms",
+        )
+        self.shutter_prefire: FloatParamHandle
 
     @kernel
-    def run_to_dark_hold(self):
-        """Load Cs, then turn off resonant light while leaving 1066 nm on."""
-        self.run()
-        self.hardware.turn_cs_light_off()
+    def run(self, turn_light_off):
+        """Run MOT then molasses, explicitly choosing the final resonant-light state.
+
+        Requires:
+            The shared hardware has been initialised. This part normally starts from
+            the standard safe shot boundary.
+
+        During:
+            Enables the 1066 nm servo and Cs light, runs the complete MOT interval,
+            then transitions into and holds the molasses interval.
+
+        Leaves:
+            The 1066 nm servo enabled at the MOT tweezer setpoint, molasses shim and
+            light settings programmed, and quadrupole demand and TTL off. Cs light is
+            off only when ``turn_light_off`` is true; otherwise it remains on. No
+            previous hardware state is restored automatically.
+        """
+        self.mot.run(
+            turn_tweezer_servo_on=True,
+            turn_light_on=True,
+            shutter_prefire=self.shutter_prefire.use(),
+        )
+        self.molasses.run(turn_light_off=turn_light_off)
 
 
 class LoadTwoStageCsMOTToTweezers(UsesLabRTIOHardware):
@@ -602,34 +694,55 @@ class LoadTwoStageCsMOTToTweezers(UsesLabRTIOHardware):
         self.setattr_fragment("molasses", CsMolassesStage, hardware=hardware)
         self.molasses: CsMolassesStage
 
-    @kernel
-    def run(self):
-        """Run all three stages, leaving the Cs resonant light and servo on."""
-        self.bulk_mot.establish()
-        delay(self.bulk_mot.duration.use())
-
-        # Light and tweezer output remain on across this boundary.  Reprogramming all
-        # stage settings here makes the second stage self-contained and scannable.
-        self.compressed_mot.apply_settings()
-        delay(self.compressed_mot.duration.use())
-
-        self.molasses.enter_from_mot()
-        delay(self.molasses.duration.use())
+        self.shutter_prefire = self.setattr_param(
+            "shutter_prefire",
+            FloatParam,
+            "Time between opening the Cs shutters and enabling RF",
+            SHUTTER_PREFIRE,
+            min=0.0 * ms,
+            max=200.0 * ms,
+            unit="ms",
+        )
+        self.shutter_prefire: FloatParamHandle
 
     @kernel
-    def run_to_dark_hold(self):
-        """Run both MOT stages and molasses, then turn off the resonant light."""
-        self.run()
-        self.hardware.turn_cs_light_off()
+    def run(self, turn_light_off):
+        """Run both MOT stages and molasses with an explicit light exit.
+
+        Requires:
+            The shared hardware has been initialised. This part normally starts from
+            the standard safe shot boundary.
+
+        During:
+            Enables the 1066 nm servo and Cs light, runs bulk MOT, changes every
+            parameterised MOT setting without interrupting the light or servo, runs
+            compressed MOT, then transitions into and holds molasses.
+
+        Leaves:
+            The 1066 nm servo enabled at the shared MOT tweezer setpoint, molasses shim
+            and light settings programmed, and quadrupole demand and TTL off. Cs light
+            is off only when ``turn_light_off`` is true; otherwise it remains on. No
+            previous hardware state is restored automatically.
+        """
+        self.bulk_mot.run(
+            turn_tweezer_servo_on=True,
+            turn_light_on=True,
+            shutter_prefire=self.shutter_prefire.use(),
+        )
+
+        # Both resources remain active across this boundary. Reapplying every
+        # compressed-stage setting keeps the stage independently scannable.
+        self.compressed_mot.run(
+            turn_tweezer_servo_on=False,
+            turn_light_on=False,
+            shutter_prefire=0.0 * s,
+        )
+
+        self.molasses.run(turn_light_off=turn_light_off)
 
 
 class CoolAndImageCsAtoms(UsesLabRTIOHardware):
-    """Cool and image Cs atoms starting from ``LoadCsMOTToTweezers.run()``.
-
-    This intentionally exposes ``run_from_molasses`` rather than a misleading generic
-    ``run``: the existing fast transition assumes that light is already on and that the
-    shutters remain open from MOT loading.
-    """
+    """Cool and image Cs with explicit resonant-light entry and exit choices."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -639,32 +752,34 @@ class CoolAndImageCsAtoms(UsesLabRTIOHardware):
         self.imaging: CsImagingStage
 
     @kernel
-    def run_from_molasses(self):
-        self.cooling.run(
-            turn_light_on=False,
-            turn_light_off=False,
-        )
-        self.imaging.enter_from_cooling()
+    def run(self, turn_light_on, turn_light_off):
+        """Run cooling and imaging with explicit light transitions.
 
-    @kernel
-    def run_from_dark_hold(self):
-        """Restart Cs cooling light, cool, and image atoms held in 1066 nm."""
+        Requires:
+            The 1066 nm servo is already enabled and the camera is ready for an
+            exposure. If ``turn_light_on`` is false, the Cs light path is already on,
+            normally from molasses.
+
+        During:
+            Runs the complete cooling interval, changes to the imaging light settings,
+            and takes one exposure.
+
+        Leaves:
+            The 1066 nm servo enabled at the cooling/imaging setpoint, cooling shim
+            settings active, quadrupole demand and TTL off, and camera-exposure TTL
+            off. Cs light is off only when ``turn_light_off`` is true; otherwise it
+            remains on at the imaging settings. No previous hardware state is restored
+            automatically.
+        """
         self.cooling.run(
-            turn_light_on=True,
+            turn_light_on=turn_light_on,
             turn_light_off=False,
         )
-        self.imaging.enter_from_cooling()
+        self.imaging.run(turn_light_off=turn_light_off)
 
 
 class SpillHotCsAtoms(UsesLabRTIOHardware):
-    """Lower the closed-loop 1066 nm trap briefly so energetic atoms escape.
-
-    Requires the Cs tweezer servo to be enabled.  ``run()`` deliberately leaves the
-    servo at the spill setpoint: the following stage must explicitly establish the
-    state it needs.  In the usual load/spill/image sequence,
-    :meth:`CoolAndImageCsAtoms.run_from_dark_hold` restores the cooling/imaging
-    setpoint before it turns the resonant Cs light back on.
-    """
+    """Lower the closed-loop 1066 nm trap briefly so energetic atoms escape."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -692,6 +807,18 @@ class SpillHotCsAtoms(UsesLabRTIOHardware):
 
     @kernel
     def run(self):
+        """Apply and hold the spill setpoint.
+
+        Requires:
+            The Cs tweezer servo is already enabled.
+
+        During:
+            Changes the closed-loop target to ``setpoint`` and waits for ``duration``.
+
+        Leaves:
+            The servo enabled at the spill setpoint. It is deliberately not restored;
+            the following stage must explicitly establish the target it needs.
+        """
         # set_cs_tweezer_setpoint() changes the target of the still-closed loop; it
         # does not disable the servo or directly impose a DDS amplitude.
         self.hardware.set_cs_tweezer_setpoint(self.setpoint.use())
@@ -699,9 +826,7 @@ class SpillHotCsAtoms(UsesLabRTIOHardware):
 
 
 class FastTrapDrop(UsesLabRTIOHardware):
-    """Drop the 1066 nm trap briefly with the output RF switch so energetic atoms escape.
-    It also holds the integrator state and resumes it after so there should be no servo problems.
-    """
+    """Drop the 1066 nm trap briefly using its output RF switch."""
 
     def build_fragment(self, hardware):
         self._use_hardware(hardware)
@@ -719,6 +844,18 @@ class FastTrapDrop(UsesLabRTIOHardware):
 
     @kernel
     def run(self):
-        # set_cs_tweezer_setpoint() changes the target of the still-closed loop; it
-        # does not disable the servo or directly impose a DDS amplitude.
+        """Perform a fast trap extinction and restore the held output.
+
+        Requires:
+            The Cs tweezer output is on.
+
+        During:
+            Holds IIR updates, switches the RF output off for ``duration``, then
+            switches the output back on.
+
+        Leaves:
+            The RF output on with IIR updates still held, exactly as implemented by
+            ``hardware.drop_cs_trap()``. The caller must explicitly re-enable
+            closed-loop updates if it requires them.
+        """
         self.hardware.drop_cs_trap(self.duration.use())

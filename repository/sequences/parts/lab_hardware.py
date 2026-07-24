@@ -6,8 +6,10 @@ operations, so the whole apparatus is initialised and made safe coherently even 
 shot only uses one species.
 
 Experimental parts receive the one :class:`LabRTIOHardware` instance as a non-owning
-reference.  Explicit method names such as ``program_rb_light()`` make it clear which
-part of the apparatus is being changed without introducing forwarding interfaces.
+reference.  They may operate a public device handle directly when the action is one
+obvious RTIO primitive, such as asserting the camera-exposure TTL.  Helper methods are
+reserved for operations which add real value: calibration, profile selection,
+multi-device coordination, timing, atomic updates, or safety ordering.
 
 The lifecycle is here too because it is the one standard policy for every experiment:
 initialise this hardware once after starting or resuming, establish the safe state
@@ -269,7 +271,7 @@ class LabRTIOHardware(Fragment):
         )
         self.suservo0.set_config(enable=1)
 
-    # -- Shared fields and camera trigger -----------------------------------------
+    # -- Shared fields ------------------------------------------------------------
 
     @kernel
     def set_fields_with_quad_demand(self, ew, ud, ns, quad):
@@ -278,22 +280,6 @@ class LabRTIOHardware(Fragment):
     @kernel
     def set_fields_with_quad_demand_off(self, ew, ud, ns):
         self.zotino0.set_dac([ew, ud, ns, 0.0 * V], [0, 1, 2, 3])
-
-    @kernel
-    def turn_quad_on(self):
-        self.ttl_quad.on()
-
-    @kernel
-    def turn_quad_off(self):
-        self.ttl_quad.off()
-
-    @kernel
-    def start_camera_exposure(self):
-        self.ttl_camera_exposure.on()
-
-    @kernel
-    def stop_camera_exposure(self):
-        self.ttl_camera_exposure.off()
 
     # -- Rb-specific actions -------------------------------------------------------
 
@@ -397,29 +383,33 @@ class LabRTIOHardware(Fragment):
 
     @kernel
     def drop_cs_trap(self, time_s):
-        """Disable Cs trap for time_s, IIR updates are disabled while dropped to stop integrator
-        wind up. There is 10+10=20 us of time to padded either side to stop windup."""
-        self.suservo0_ch1.set(  # stop integrator
+        """Extinguish the Cs trap briefly while preventing integrator wind-up.
+
+        IIR updates are held before the RF output is disabled. The 10 us interval on
+        either side gives the held output time to settle. This helper restores the RF
+        output.
+        """
+        self.suservo0_ch1.set(  # Hold IIR updates.
             en_out=1,
             en_iir=0,
             profile=self.cs_suservo_profile,
         )
-        delay(10*us)
-        self.suservo0_ch1.set( # RF Switch off
+        delay(10 * us)
+        self.suservo0_ch1.set(  # Switch RF output off.
             en_out=0,
             en_iir=0,
             profile=self.cs_suservo_profile,
         )
         delay(time_s)
-        self.suservo0_ch1.set( # RF Switch on
+        self.suservo0_ch1.set(  # Restore RF output.
             en_out=1,
             en_iir=0,
             profile=self.cs_suservo_profile,
         )
-        delay(10*us)
-        self.suservo0_ch1.set( # Re-enable servo
+        delay(10 * us)
+        self.suservo0_ch1.set(
             en_out=1,
-            en_iir=0,
+            en_iir=1,
             profile=self.cs_suservo_profile,
         )
 
@@ -428,9 +418,10 @@ class LabRTIOHardware(Fragment):
 class UsesLabRTIOHardware(Fragment):
     """Base for a part which borrows the shared :class:`LabRTIOHardware` instance.
 
-    This only stores the reference and makes it safe to follow from kernel code.  It
-    does not own, initialise, wrap, or rename the hardware; subclasses continue to call
-    explicit methods such as ``program_rb_light()`` directly.
+    This only stores the reference and makes it safe to follow from kernel code. It
+    does not own or initialise hardware. Subclasses call helpers for calibrated or
+    coordinated actions such as ``program_rb_light()``, and may follow the reference
+    to a device for a transparent single operation such as ``ttl_quad.off()``.
     """
 
     def _use_hardware(self, hardware):

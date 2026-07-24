@@ -1,4 +1,4 @@
-"""Cs MOT-to-tweezers shots, result publication, scans, and optimisation recipes.
+"""Atom experiment: Cs MOT-to-tweezers shots, statistics, scans, and optimisation.
 
 The reusable hardware, settings, stages, and experimental operations live in
 ``repository.sequences.parts.cs_mot``.  This file intentionally stays at the recipe
@@ -50,8 +50,8 @@ TWEEZER_LOADING_GOODNESS_ERROR_RESULT = "tweezer_loading_goodness_error"
 # -----------------------------------------------------------------------------
 
 
-class LoadCsMOTToTweezersImageRefactored(ExpFragment):
-    """Run the refactored Cs load/cool/image sequence once."""
+class LoadCsMOTToTweezersImage(ExpFragment):
+    """Run the current Cs load/cool/image sequence once."""
 
     def build_fragment(self):
         # The prepared runtime determines which core compiles ``run_once`` by looking
@@ -96,8 +96,11 @@ class LoadCsMOTToTweezersImageRefactored(ExpFragment):
         delay(20.0 * ms)
 
         # The top-level sequence is now a readable composition of two reusable parts.
-        self.load_cs_mot_to_tweezers.run()
-        self.cool_and_image_atoms.run_from_molasses()
+        self.load_cs_mot_to_tweezers.run(turn_light_off=False)
+        self.cool_and_image_atoms.run(
+            turn_light_on=False,
+            turn_light_off=True,
+        )
 
         self.environment.hardware.set_cs_tweezer_servo_enabled(0)
         delay(5.0 * ms)
@@ -114,8 +117,8 @@ class LoadCsMOTToTweezersImageRefactored(ExpFragment):
         self.image_readout.wait_read_all()
 
 
-LoadCsMOTToTweezersImageRefactoredExp = make_fragment_prepared_dashboard_scan_exp(
-    LoadCsMOTToTweezersImageRefactored,
+LoadCsMOTToTweezersImageExp = make_fragment_prepared_dashboard_scan_exp(
+    LoadCsMOTToTweezersImage,
     max_rtio_underflow_retries=0,
 )
 
@@ -125,16 +128,16 @@ LoadCsMOTToTweezersImageRefactoredExp = make_fragment_prepared_dashboard_scan_ex
 # -----------------------------------------------------------------------------
 
 
-class LoadCsMOTToTweezersImageStatisticsRefactored(ExpFragment):
-    """Repeat the refactored shot and publish one probability point."""
+class LoadCsMOTToTweezersImageStatistics(ExpFragment):
+    """Repeat the current shot and publish one probability point."""
 
     def build_fragment(self):
         self.setattr_fragment(
             "shot",
-            LoadCsMOTToTweezersImageRefactored,
+            LoadCsMOTToTweezersImage,
             detached=True,
         )
-        self.shot: LoadCsMOTToTweezersImageRefactored
+        self.shot: LoadCsMOTToTweezersImage
 
         self.repeat_scan = prepare_child_scan(
             self,
@@ -205,10 +208,10 @@ class LoadCsMOTToTweezersImageStatisticsRefactored(ExpFragment):
         )
 
 
-class LoadCsMOTToTweezersImageStatisticsRefactoredDashboard(
-    LoadCsMOTToTweezersImageStatisticsRefactored
+class LoadCsMOTToTweezersImageStatisticsDashboard(
+    LoadCsMOTToTweezersImageStatistics
 ):
-    """Dashboard wrapper exposing the most frequently adjusted settings."""
+    """Dashboard wrapper for current Cs MOT-loading statistics."""
 
     def get_always_shown_params(self):
         shown = super().get_always_shown_params()
@@ -229,9 +232,9 @@ class LoadCsMOTToTweezersImageStatisticsRefactoredDashboard(
         return shown
 
 
-LoadCsMOTToTweezersImageStatisticsRefactoredExp = (
+LoadCsMOTToTweezersImageStatisticsExp = (
     make_fragment_prepared_dashboard_scan_exp(
-        LoadCsMOTToTweezersImageStatisticsRefactoredDashboard,
+        LoadCsMOTToTweezersImageStatisticsDashboard,
         max_rtio_underflow_retries=0,
     )
 )
@@ -279,7 +282,7 @@ CS_LOADING_BO_EXPLORATION_EVERY_BATCHES = 5
 
 
 def _make_cs_loading_bo_request(
-    fragment: LoadCsMOTToTweezersImageStatisticsRefactored,
+    fragment: LoadCsMOTToTweezersImageStatistics,
 ) -> ScanRequest:
     """Optimise loading goodness over MOT-stage controls.
 
@@ -533,8 +536,8 @@ def _make_cs_loading_bo_request(
     )
 
 
-OptimiseCsMOTLoadingRefactoredExp = make_fragment_prepared_scan_exp(
-    LoadCsMOTToTweezersImageStatisticsRefactored,
+OptimiseCsMOTLoadingExp = make_fragment_prepared_scan_exp(
+    LoadCsMOTToTweezersImageStatistics,
     _make_cs_loading_bo_request,
     max_rtio_underflow_retries=0,
 )

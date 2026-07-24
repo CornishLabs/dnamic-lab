@@ -1,3 +1,5 @@
+"""Archived experiment exploring mixed AWG/RTIO sequence composition."""
+
 from contextlib import suppress
 from typing import List, Set
 import logging

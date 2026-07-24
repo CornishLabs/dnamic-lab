@@ -1,3 +1,19 @@
+"""No-atom experiment: characterise the 1066 nm SU-Servo with a power meter.
+
+Physical setup required:
+    Insert the Thorlabs PM100D sensor at the established 1066 nm calibration test
+    point before running this experiment. This deliberately changes the optical path,
+    so do not run an atom sequence in this configuration.
+
+Restoration required:
+    Remove the power-meter sensor and restore the ordinary 1066 nm optical path before
+    returning to atom experiments.
+
+The experiment enables autoranging and configures the meter for 1066 nm. Device
+cleanup disables the SU-Servo output, but it cannot verify or undo the physical
+power-meter insertion.
+"""
+
 from artiq.experiment import EnvExperiment
 
 from artiq.coredevice.ad9910 import AD9910
@@ -45,6 +61,12 @@ TWEEZER_SUSERVO_GAIN_LIMIT = 0.0
 
 
 class SUServo1066Powermeter(ExpFragment):
+    """Characterise 1066 nm power; the PM100D must be inserted at the test point.
+
+    See the module-level ``Physical setup required`` and ``Restoration required``
+    sections before running this experiment.
+    """
+
     def build_fragment(self):
         self.setattr_device("core")
         self.core: Core

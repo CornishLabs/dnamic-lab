@@ -1,4 +1,4 @@
-"""Rb MOT-to-tweezers shots, result publication, and scan recipes.
+"""Atom experiment: Rb MOT-to-tweezers shots, statistics, and scan recipes.
 
 The reusable hardware, settings, stages, and experimental operations live in
 ``repository.sequences.parts.rb_mot``.  This file intentionally stays at the recipe
@@ -40,8 +40,8 @@ SHOTS_PER_POINT = 50
 # -----------------------------------------------------------------------------
 
 
-class LoadRbMOTToTweezersImageRefactored(ExpFragment):
-    """Run the refactored Rb load/cool/image sequence once."""
+class LoadRbMOTToTweezersImage(ExpFragment):
+    """Run the current Rb load/cool/image sequence once."""
 
     def build_fragment(self):
         # The prepared runtime determines which core compiles ``run_once`` by looking
@@ -83,8 +83,11 @@ class LoadRbMOTToTweezersImageRefactored(ExpFragment):
         delay(20.0 * ms)
 
         # The top-level sequence is now a readable composition of two reusable parts.
-        self.load_rb_mot_to_tweezers.run()
-        self.cool_and_image_atoms.run_from_molasses()
+        self.load_rb_mot_to_tweezers.run(turn_light_off=False)
+        self.cool_and_image_atoms.run(
+            turn_light_on=False,
+            turn_light_off=True,
+        )
 
         self.environment.hardware.set_rb_tweezer_servo_enabled(0)
         delay(5.0 * ms)
@@ -101,8 +104,8 @@ class LoadRbMOTToTweezersImageRefactored(ExpFragment):
         self.image_readout.wait_read_all()
 
 
-LoadRbMOTToTweezersImageRefactoredExp = make_fragment_prepared_dashboard_scan_exp(
-    LoadRbMOTToTweezersImageRefactored,
+LoadRbMOTToTweezersImageExp = make_fragment_prepared_dashboard_scan_exp(
+    LoadRbMOTToTweezersImage,
     max_rtio_underflow_retries=0,
 )
 
@@ -112,16 +115,16 @@ LoadRbMOTToTweezersImageRefactoredExp = make_fragment_prepared_dashboard_scan_ex
 # -----------------------------------------------------------------------------
 
 
-class LoadRbMOTToTweezersImageStatisticsRefactored(ExpFragment):
-    """Repeat the refactored shot and publish one probability point."""
+class LoadRbMOTToTweezersImageStatistics(ExpFragment):
+    """Repeat the current shot and publish one probability point."""
 
     def build_fragment(self):
         self.setattr_fragment(
             "shot",
-            LoadRbMOTToTweezersImageRefactored,
+            LoadRbMOTToTweezersImage,
             detached=True,
         )
-        self.shot: LoadRbMOTToTweezersImageRefactored
+        self.shot: LoadRbMOTToTweezersImage
 
         self.repeat_scan = prepare_child_scan(
             self,
@@ -157,10 +160,10 @@ class LoadRbMOTToTweezersImageStatisticsRefactored(ExpFragment):
             channel.push(outputs[name])
 
 
-class LoadRbMOTToTweezersImageStatisticsRefactoredDashboard(
-    LoadRbMOTToTweezersImageStatisticsRefactored
+class LoadRbMOTToTweezersImageStatisticsDashboard(
+    LoadRbMOTToTweezersImageStatistics
 ):
-    """Dashboard wrapper exposing the most frequently adjusted settings."""
+    """Dashboard wrapper for current Rb MOT-loading statistics."""
 
     def get_always_shown_params(self):
         shown = super().get_always_shown_params()
@@ -181,9 +184,9 @@ class LoadRbMOTToTweezersImageStatisticsRefactoredDashboard(
         return shown
 
 
-LoadRbMOTToTweezersImageStatisticsRefactoredExp = (
+LoadRbMOTToTweezersImageStatisticsExp = (
     make_fragment_prepared_dashboard_scan_exp(
-        LoadRbMOTToTweezersImageStatisticsRefactoredDashboard,
+        LoadRbMOTToTweezersImageStatisticsDashboard,
         max_rtio_underflow_retries=0,
     )
 )

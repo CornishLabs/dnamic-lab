@@ -1,6 +1,7 @@
-"""
-This module contains fragments for performing dual species Raman Sideband Cooling (RSC) of atoms
-in tweezer traps.
+"""Archived fragments for dual-species Raman sideband cooling.
+
+This predates the current ``LabEnvironment`` and stage-contract conventions, but is
+retained as a reference for a future composable dual-RSC implementation.
 
       z || RB4 (antiparallel)
       
@@ -45,7 +46,7 @@ from artiq.coredevice.ttl import TTLOut
 from ndscan.experiment import Fragment, ExpFragment, make_fragment_scan_exp
 from ndscan.experiment.parameters import IntParam, FloatParam
 
-from repository.sequences.parts.initialiser import InitialiseHardware
+from repository.sequences.unused.parts.initialiser import InitialiseHardware
 
 logger = logging.getLogger(__name__)
 

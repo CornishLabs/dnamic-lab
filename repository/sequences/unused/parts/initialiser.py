@@ -1,3 +1,5 @@
+"""Archived hardware initialiser used by the legacy sequence parts."""
+
 from typing import List, Set
 import logging
 

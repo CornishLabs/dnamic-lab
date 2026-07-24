@@ -1,3 +1,5 @@
+"""Archived standalone Rb MOT experiment, retained as a reference."""
+
 from artiq.coredevice.ad9910 import AD9910
 from artiq.coredevice.core import Core
 from artiq.coredevice.suservo import Channel, SUServo

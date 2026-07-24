@@ -1,3 +1,5 @@
+"""Archived monolithic Rb MOT implementation, retained as a reference."""
+
 import numpy as np
 
 from dnamic_toolkit.imaging.binomial import estimate_probability_array
@@ -42,18 +44,15 @@ from ndscan.runtime.api import prepare_child_scan
 DDS_ATTEN_DB = 8.0 # This is what we use across all DDS Channels
 TWEEZER_SUSERVO_FREQ = 80.0 * MHz
 TWEEZER_SUSERVO_ATTEN_DB = 8.0
-TWEEZER_SUSERVO_ADC_CHANNEL = 1
+TWEEZER_SUSERVO_ADC_CHANNEL = 0
 TWEEZER_SUSERVO_PGIA_GAIN = 0
-# TWEEZER_SUSERVO_TARGET_V = 1.15
-# TWEEZER_SUSERVO_OFFSET = -TWEEZER_SUSERVO_TARGET_V * (
-#     10.0 ** (TWEEZER_SUSERVO_PGIA_GAIN - 1)
-# )
-TWEEZER_SUSERVO_KP = -0.25
-TWEEZER_SUSERVO_KI = -15_000.0
+TWEEZER_SUSERVO_TARGET_V = 1.15
+TWEEZER_SUSERVO_OFFSET = -TWEEZER_SUSERVO_TARGET_V * (
+    10.0 ** (TWEEZER_SUSERVO_PGIA_GAIN - 1)
+)
+TWEEZER_SUSERVO_KP = -1.8
+TWEEZER_SUSERVO_KI = -1_550_000.0
 TWEEZER_SUSERVO_GAIN_LIMIT = 0.0
-
-TWEEZER_MOT_SETPOINT = 6.4
-TWEEZER_IMAGING_SETPOINT = 5.4
 
 CAMERA_TEMP_C = -60
 CAMERA_GAIN = 100
@@ -68,26 +67,19 @@ CAMERA_FAST_EXT_TRIGGER = True
 CAMERA_ROI = (0, 511, 0, 511)  # x0, x1, y0, y1 (inclusive)
 
 SHUTTER_PREFIRE = 10.0 * ms
-MOT_HOLD_TIME = 0.3 * s
-MOLASSES_TIME = 35.0 * ms
+MOT_HOLD_TIME = 1.0 * s
+MOLASSES_TIME = 30.0 * ms
 COOLING_TIME = 10.0 * ms
 SHOTS_PER_POINT = 50
 
-NUM_TWEEZER_ROIS = 9
+NUM_TWEEZER_ROIS = 5
 NUM_TWEEZER_ROI_GROUPS = 1
 TWEEZER_ROI_RESULT_SHAPE = (NUM_TWEEZER_ROI_GROUPS, NUM_TWEEZER_ROIS)
 TWEEZER_ROI_RESULT_DIM_NAMES = ("group", "roi")
-
-# ``live.*`` datasets are temporary, two-way state shared with dashboard applets.
-# This experiment produces one image per shot, so it owns slot 0 and resets that
-# slot's validity before every acquisition. The ROI and threshold datasets are
-# deliberately separate from the image: the ROI applet can move them while a
-# repeated experiment is running, and the next shot will read the new values.
-LIVE_IMAGING_EXPECTED_IMAGES_DATASET = "live.imaging.expected_images"
-LIVE_IMAGING_SLOT_0_VALID_DATASET = "live.imaging.slot0.valid"
-LIVE_IMAGING_SLOT_0_IMAGE_DATASET = "live.imaging.slot0.image"
-TWEEZER_ROIS_DATASET = "live.imaging.slot0.rois"
-TWEEZER_ROI_THRESHOLDS_DATASET = "live.imaging.slot0.thresholds"
+TWEEZER_ROIS_DATASET = "rb_mot.tweezer_rois"
+TWEEZER_ROI_THRESHOLDS_DATASET = "rb_mot.tweezer_roi_thresholds"
+TWEEZER_ROI_COUNTS_DATASET = "rb_mot.tweezer_roi_counts"
+TWEEZER_ROI_BRIGHT_DATASET = "rb_mot.tweezer_roi_bright"
 TWEEZER_ROI_PROBABILITY_RESULT = "tweezer_roi_bright_probability"
 TWEEZER_ROI_PROBABILITY_ERROR_RESULT = "tweezer_roi_bright_probability_error"
 TWEEZER_AVERAGE_PROBABILITY_RESULT = "tweezer_average_bright_probability"
@@ -97,91 +89,65 @@ TWEEZER_ROI_NUM_BRIGHT_RESULT = "tweezer_roi_num_bright"
 
 # These ROI bounds are Python-style half-open bounds: (y0, y1, x0, x1).
 # The extra outer list is the ROI "group" dimension expected by image_roi_applet.py.
-ROI_SPACING=7.25
 DEFAULT_TWEEZER_ROIS = (
-    tuple((round(258-ROI_SPACING*i), round(258-ROI_SPACING*i)+3, 171, 174) for i in range(9)),
+    (
+        (255, 258, 127, 130),
+        (242, 245, 127, 130),
+        (227, 230, 127, 130),
+        (213, 216, 127, 130),
+        (199, 202, 127, 130),
+    ),
 )
 
 # Integrated-count thresholds for the five ROIs. This deliberately starts
-# uncalibrated; replace it with thresholds obtained from real empty/loaded shots.
-DEFAULT_TWEEZER_ROI_THRESHOLDS = (tuple(9000.0 for i in range(9)),)
+# uncalibrated; set rb_mot.tweezer_roi_thresholds from real empty/loaded shots.
+DEFAULT_TWEEZER_ROI_THRESHOLDS = ((1.0e12, 1.0e12, 1.0e12, 1.0e12, 1.0e12),)
 
 
 def _get_tweezer_rois(owner):
-    rois = owner.get_dataset(TWEEZER_ROIS_DATASET, archive=False)
+    try:
+        rois = owner.get_dataset(TWEEZER_ROIS_DATASET)
+    except KeyError:
+        rois = DEFAULT_TWEEZER_ROIS
+        owner.set_dataset(
+            TWEEZER_ROIS_DATASET,
+            rois,
+            broadcast=True,
+            persist=True,
+        )
     return np.asarray(rois, dtype=np.int32)
 
 
 def _get_tweezer_roi_thresholds(owner):
-    thresholds = owner.get_dataset(TWEEZER_ROI_THRESHOLDS_DATASET, archive=False)
+    try:
+        thresholds = owner.get_dataset(TWEEZER_ROI_THRESHOLDS_DATASET)
+    except KeyError:
+        thresholds = DEFAULT_TWEEZER_ROI_THRESHOLDS
+        owner.set_dataset(
+            TWEEZER_ROI_THRESHOLDS_DATASET,
+            thresholds,
+            broadcast=True,
+            persist=True,
+        )
     thresholds = np.asarray(thresholds, dtype=np.float64)
     if thresholds.shape == (NUM_TWEEZER_ROIS,):
         thresholds = thresholds.reshape(TWEEZER_ROI_RESULT_SHAPE)
     return thresholds
 
 
-def _initialise_live_imaging_datasets(owner):
-    """Initialise this experiment's one live-image slot.
-
-    A fragment instance may enter ``host_setup`` more than once when used in a
-    detached child scan. The instance-local guard ensures that those later entries
-    do not restore the defaults over a manual ROI edit.
-    """
-    if owner._live_imaging_initialised:
-        return
-
-    owner.set_dataset(
-        LIVE_IMAGING_SLOT_0_VALID_DATASET,
-        False,
-        broadcast=True,
-        persist=False,
-        archive=False,
-    )
+def _ensure_tweezer_roi_datasets(owner):
     owner.set_dataset(
         TWEEZER_ROIS_DATASET,
-        np.asarray(DEFAULT_TWEEZER_ROIS, dtype=np.int32),
+        _get_tweezer_rois(owner).tolist(),
         broadcast=True,
-        persist=False,
-        archive=False,
+        persist=True,
     )
     owner.set_dataset(
         TWEEZER_ROI_THRESHOLDS_DATASET,
-        np.asarray(DEFAULT_TWEEZER_ROI_THRESHOLDS, dtype=np.float64),
+        _get_tweezer_roi_thresholds(owner).tolist(),
         broadcast=True,
-        persist=False,
-        archive=False,
+        persist=True,
     )
-    owner.set_dataset(
-        LIVE_IMAGING_EXPECTED_IMAGES_DATASET,
-        1,
-        broadcast=True,
-        persist=False,
-        archive=False,
-    )
-    owner._live_imaging_initialised = True
-
-
-def _set_live_image_valid(owner, valid):
-    """Set slot 0's small best-effort validity/commit flag."""
-    owner.set_dataset(
-        LIVE_IMAGING_SLOT_0_VALID_DATASET,
-        bool(valid),
-        broadcast=True,
-        persist=False,
-        archive=False,
-    )
-
-
-def _publish_live_image(owner, image):
-    """Publish slot 0, writing ``valid`` last as its commit marker."""
-    owner.set_dataset(
-        LIVE_IMAGING_SLOT_0_IMAGE_DATASET,
-        image,
-        broadcast=True,
-        persist=False,
-        archive=False,
-    )
-    _set_live_image_valid(owner, True)
 
 
 def configure_andor_for_rb_single_image(andor_ctrl):
@@ -205,38 +171,38 @@ def configure_andor_for_rb_single_image(andor_ctrl):
     )
 
 # MOT stage good values
-CS_COOL_DDS_FREQ_MHZ_MOT = 99.45
-CS_COOL_DDS_ASF_MOT = 0.58
-CS_REPUMP_DDS_FREQ_MHZ_MOT = 94.17
-CS_REPUMP_DDS_ASF_MOT = 0.36
-CS_EW_SHIMS_V_MOT = 0.04 
-CS_UD_SHIMS_V_MOT = 0.51   # was  0.379    
-CS_NS_SHIMS_V_MOT = -0.25  # was -0.337
-CS_QUAD_V_MOT = 8.8
+RB_COOL_DDS_FREQ_MHZ_MOT = 101.25
+RB_COOL_DDS_ASF_MOT = 0.48
+RB_REPUMP_DDS_FREQ_MHZ_MOT = 80.64
+RB_REPUMP_DDS_ASF_MOT = 0.32
+RB_EW_SHIMS_V_MOT = -0.367 # -0.406
+RB_UD_SHIMS_V_MOT = 0.8    #  0.867
+RB_NS_SHIMS_V_MOT = -0.112 # -0.122
+RB_QUAD_V_MOT = 8.8
 
 # Initial transfer/imaging values from the old control system. ASFs are scaled
 # from the MOT dBm values, assuming DDS ASF is an RF voltage amplitude.
-CS_COOL_DDS_FREQ_MHZ_MOLASSES = 114.2 # CHECKED
-CS_COOL_DDS_ASF_MOLASSES = 0.58
-CS_REPUMP_DDS_ASF_MOLASSES = 0.37
-CS_EW_SHIMS_V_MOLASSES = -0.15
-CS_UD_SHIMS_V_MOLASSES = 1.05
-CS_NS_SHIMS_V_MOLASSES = 0.5
+RB_COOL_DDS_FREQ_MHZ_MOLASSES = 136.16 # CHECKED
+RB_COOL_DDS_ASF_MOLASSES = 0.67
+RB_REPUMP_DDS_ASF_MOLASSES = 0.28
+RB_EW_SHIMS_V_MOLASSES = -0.12
+RB_UD_SHIMS_V_MOLASSES = 1.15
+RB_NS_SHIMS_V_MOLASSES = 0.55
 
 
 # COOLING STAGE BEFORE IMAGING
-CS_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING = 119.0  # CHECKED
-CS_COOL_DDS_ASF_TWEEZER_COOLING = 0.6
-CS_REPUMP_DDS_ASF_TWEEZER_COOLING= 0.2
+RB_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING = 125.54 # CHECKED
+RB_COOL_DDS_ASF_TWEEZER_COOLING = 0.43
+RB_REPUMP_DDS_ASF_TWEEZER_COOLING= 0.2
 
 # IMAGING
-CS_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE = 105.0  # CHECKED
-CS_COOL_DDS_ASF_TWEEZER_IMAGE = 0.58
-CS_REPUMP_DDS_ASF_TWEEZER_IMAGE = 0.2
+RB_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE = 103.49 # CHECKED
+RB_COOL_DDS_ASF_TWEEZER_IMAGE = 0.415
+RB_REPUMP_DDS_ASF_TWEEZER_IMAGE = 0.12
 
-CS_EW_SHIMS_V_IMAGING_COOLING = -0.15  #CHECKED
-CS_UD_SHIMS_V_IMAGING_COOLING = 1.15
-CS_NS_SHIMS_V_IMAGING_COOLING = 0.5
+RB_EW_SHIMS_V_IMAGING_COOLING = -0.05  #CHECKED
+RB_UD_SHIMS_V_IMAGING_COOLING = 1.1
+RB_NS_SHIMS_V_IMAGING_COOLING = 0.1
 
 class HardwareInitOnce(Fragment):
     # TODO: Eventually this fragment should not manually enumerate the names of the
@@ -247,12 +213,12 @@ class HardwareInitOnce(Fragment):
         self.core: Core
 
         # DDSs
-        self.setattr_device("dds_cpld_cs")
-        self.dds_cpld_cs: CPLD
-        self.setattr_device("dds_ch_cs_cool")
-        self.dds_ch_cs_cool: AD9910
-        self.setattr_device("dds_ch_cs_repump")
-        self.dds_ch_cs_repump: AD9910
+        self.setattr_device("dds_cpld_rb")
+        self.dds_cpld_rb: CPLD
+        self.setattr_device("dds_ch_rb_cool")
+        self.dds_ch_rb_cool: AD9910
+        self.setattr_device("dds_ch_rb_repump")
+        self.dds_ch_rb_repump: AD9910
 
         # DAC
         self.setattr_device("zotino0")
@@ -261,8 +227,8 @@ class HardwareInitOnce(Fragment):
         # SUServo
         self.setattr_device("suservo0")
         self.suservo0: SUServo
-        self.setattr_device("suservo0_ch1")
-        self.suservo0_ch1: SUServoChannel
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
 
         # Local variables
         self._needs_hardware_init = True
@@ -270,14 +236,14 @@ class HardwareInitOnce(Fragment):
     def host_setup(self):
         super().host_setup()
 
-        self.suservo_profile = self.suservo0_ch1.servo_channel
-        self.suservo_attenuator_channel = self.suservo0_ch1.servo_channel % 4
-        self.suservo_cpld = self.suservo0_ch1.dds.cpld
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
 
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {
             "suservo0",
-            "suservo0_ch1",
+            "suservo0_ch0",
             "suservo_profile",
             "suservo_attenuator_channel",
             "suservo_cpld",
@@ -304,7 +270,7 @@ class HardwareInitOnce(Fragment):
         delay(10.0 * ms)
 
         # DDSs
-        self.dds_cpld_cs.init()
+        self.dds_cpld_rb.init()
         # I am not entirely sure why, but these DDS initialisations need more
         # slack.
         ## Maybe the channel initialisations wait an indeterminate amount of time 
@@ -312,10 +278,10 @@ class HardwareInitOnce(Fragment):
         #    pseudorandom RTIOUnderflow.
         self.core.break_realtime()
         delay(40*ms)  
-        self.dds_ch_cs_cool.init()
+        self.dds_ch_rb_cool.init()
         self.core.break_realtime()
         delay(40*ms)     
-        self.dds_ch_cs_repump.init()
+        self.dds_ch_rb_repump.init()
         self.core.break_realtime()
 
         # DAC
@@ -336,23 +302,23 @@ class HardwareInitOnce(Fragment):
             self.suservo_attenuator_channel,
             TWEEZER_SUSERVO_ATTEN_DB,
         )
-        self.suservo0_ch1.set_iir(
+        self.suservo0_ch0.set_iir(
             profile=self.suservo_profile,
             adc=TWEEZER_SUSERVO_ADC_CHANNEL,
             kp=TWEEZER_SUSERVO_KP,
             ki=TWEEZER_SUSERVO_KI,
             g=TWEEZER_SUSERVO_GAIN_LIMIT,
         )
-        self.suservo0_ch1.set_dds(
+        self.suservo0_ch0.set_dds(
             profile=self.suservo_profile,
             frequency=TWEEZER_SUSERVO_FREQ,
-            offset=0.0,
+            offset=TWEEZER_SUSERVO_OFFSET,
         )
-        self.suservo0_ch1.set_y( # Set integrator (output) to zero
+        self.suservo0_ch0.set_y( # Set integrator (output) to zero
             profile=self.suservo_profile,
             y=0.0,
         )
-        self.suservo0_ch1.set(
+        self.suservo0_ch0.set(
             en_out=0, # RF switch off
             en_iir=0, # IIR integrator updates off (unservoed)
             profile=self.suservo_profile,
@@ -378,15 +344,15 @@ class SafeHardwareState(Fragment):
         self.ttl_camera_exposure: TTLOut
         self.setattr_device("ttl_quad")
         self.ttl_quad: TTLOut
-        self.setattr_device("ttl_cs_cool_shut")
-        self.ttl_cs_cool_shut: TTLOut
-        self.setattr_device("ttl_cs_repump_shut")
-        self.ttl_cs_repump_shut: TTLOut
+        self.setattr_device("ttl_rb_cool_shut")
+        self.ttl_rb_cool_shut: TTLOut
+        self.setattr_device("ttl_rb_repump_shut")
+        self.ttl_rb_repump_shut: TTLOut
 
-        self.setattr_device("dds_ch_cs_cool")
-        self.dds_ch_cs_cool: AD9910
-        self.setattr_device("dds_ch_cs_repump")
-        self.dds_ch_cs_repump: AD9910
+        self.setattr_device("dds_ch_rb_cool")
+        self.dds_ch_rb_cool: AD9910
+        self.setattr_device("dds_ch_rb_repump")
+        self.dds_ch_rb_repump: AD9910
 
         self.setattr_device("zotino0")
         self.zotino0: Zotino
@@ -394,20 +360,20 @@ class SafeHardwareState(Fragment):
         # SUServo
         self.setattr_device("suservo0")
         self.suservo0: SUServo
-        self.setattr_device("suservo0_ch1")
-        self.suservo0_ch1: SUServoChannel
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
 
     def host_setup(self):
         super().host_setup()
 
-        self.suservo_profile = self.suservo0_ch1.servo_channel
-        self.suservo_attenuator_channel = self.suservo0_ch1.servo_channel % 4
-        self.suservo_cpld = self.suservo0_ch1.dds.cpld
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
 
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {
             "suservo0",
-            "suservo0_ch1",
+            "suservo0_ch0",
             "suservo_profile",
             "suservo_attenuator_channel",
             "suservo_cpld",
@@ -420,10 +386,10 @@ class SafeHardwareState(Fragment):
 
         self.ttl_camera_exposure.off()
         self.ttl_quad.off()
-        self.ttl_cs_cool_shut.off()
-        self.ttl_cs_repump_shut.off()
-        self.dds_ch_cs_cool.sw.off()
-        self.dds_ch_cs_repump.sw.off()
+        self.ttl_rb_cool_shut.off()
+        self.ttl_rb_repump_shut.off()
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
 
         self.zotino0.set_dac(
             [0.0 * V, 0.0 * V, 0.0 * V, 0.0 * V],
@@ -431,15 +397,15 @@ class SafeHardwareState(Fragment):
         )
 
         delay(1*ms)
-        self.dds_ch_cs_cool.set_att(DDS_ATTEN_DB)
-        self.dds_ch_cs_repump.set_att(DDS_ATTEN_DB)
+        self.dds_ch_rb_cool.set_att(DDS_ATTEN_DB)
+        self.dds_ch_rb_repump.set_att(DDS_ATTEN_DB)
 
         self.suservo0.set_config(enable=0)
-        self.suservo0_ch1.set_y( # Set integrator (output) to zero
+        self.suservo0_ch0.set_y( # Set integrator (output) to zero
             profile=self.suservo_profile,
             y=0.0,
         )
-        self.suservo0_ch1.set(
+        self.suservo0_ch0.set(
             en_out=0, # RF switch off
             en_iir=0, # IIR integrator updates off (unservoed)
             profile=self.suservo_profile,
@@ -475,71 +441,67 @@ class KnownHardwareState(Fragment):
 
 
 class TweezerSUServoToneService(Fragment):
-    """Servoed SU-Servo channel 1 output used as the tweezer RF drive."""
+    """Servoed SU-Servo channel 0 output used as the tweezer RF drive."""
 
-    def build_fragment(self,
-                       setpoint_default=TWEEZER_MOT_SETPOINT):
+    def build_fragment(self):
         self.setattr_device("core")
         self.core: Core
 
         self.setattr_device("suservo0")
         self.suservo0: SUServo
-        self.setattr_device("suservo0_ch1")
-        self.suservo0_ch1: SUServoChannel
-
-        self.setattr_param("setpoint",
-                    FloatParam,
-                    "1066 Setpoint",
-                    setpoint_default,
-                    min=0.0, max=10.0)
-        self.setpoint: FloatParamHandle
+        self.setattr_device("suservo0_ch0")
+        self.suservo0_ch0: SUServoChannel
 
     def host_setup(self):
         super().host_setup()
 
-        self.suservo_profile = self.suservo0_ch1.servo_channel
-        self.suservo_attenuator_channel = self.suservo0_ch1.servo_channel % 4
-        self.suservo_cpld = self.suservo0_ch1.dds.cpld
+        self.suservo_profile = self.suservo0_ch0.servo_channel
+        self.suservo_attenuator_channel = self.suservo0_ch0.servo_channel % 4
+        self.suservo_cpld = self.suservo0_ch0.dds.cpld
 
         kernel_invariants = getattr(self, "kernel_invariants", set())
         self.kernel_invariants = kernel_invariants | {
             "suservo0",
-            "suservo0_ch1",
+            "suservo0_ch0",
             "suservo_profile",
             "suservo_attenuator_channel",
             "suservo_cpld",
         }
 
     @kernel
-    def setpoint_v_to_offset(self, setpoint_v):
-        """Convert physical ADC input volts to normalized SUServo offset."""
-        pgia_gain = 10.0**TWEEZER_SUSERVO_PGIA_GAIN
-        return -setpoint_v * pgia_gain / 10.24
-
-    @kernel
-    def set_rf_iir(self, rf_sw=1, en_iir=1):
-        self.suservo0_ch1.set(
-            en_out=rf_sw,
-            en_iir=en_iir,
+    def turn_on(self):
+        self.suservo0_ch0.set(
+            en_out=0,
+            en_iir=0,
             profile=self.suservo_profile,
         )
-    
-    @kernel
-    def set_setpoint(self):
-        self.suservo0_ch1.set_dds_offset(
+        self.suservo0_ch0.set_y(
             profile=self.suservo_profile,
-            offset=self.setpoint_v_to_offset(self.setpoint.use()),
+            y=0.0,
+        )
+        self.suservo0_ch0.set(
+            en_out=1,
+            en_iir=1,
+            profile=self.suservo_profile,
+        )
+
+    @kernel
+    def turn_off(self):
+        self.suservo0_ch0.set(
+            en_out=0,
+            en_iir=0,
+            profile=self.suservo_profile,
         )
 
 
-class CsLightService(Fragment):
+class RbLightService(Fragment):
 
     def build_fragment(
         self,
-        cool_frequency_default=CS_COOL_DDS_FREQ_MHZ_MOT*MHz,
-        repump_frequency_default=CS_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
-        cool_dds_amp_default=CS_COOL_DDS_ASF_MOT,
-        repump_dds_amp_default=CS_REPUMP_DDS_ASF_MOT,
+        cool_frequency_default=RB_COOL_DDS_FREQ_MHZ_MOT*MHz,
+        repump_frequency_default=RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+        cool_dds_amp_default=RB_COOL_DDS_ASF_MOT,
+        repump_dds_amp_default=RB_REPUMP_DDS_ASF_MOT,
         shutter_prefire_default=SHUTTER_PREFIRE,
     ):
         self.setattr_param("cool_frequency",
@@ -579,16 +541,16 @@ class CsLightService(Fragment):
         
         self.setattr_device("core")
         self.core: Core
-        self.setattr_device("dds_ch_cs_cool")
-        self.dds_ch_cs_cool: AD9910
-        self.setattr_device("dds_ch_cs_repump")
-        self.dds_ch_cs_repump: AD9910
-        self.setattr_device("dds_cpld_cs")
-        self.dds_cpld_cs: CPLD
-        self.setattr_device("ttl_cs_cool_shut")
-        self.ttl_cs_cool_shut: TTLOut
-        self.setattr_device("ttl_cs_repump_shut")
-        self.ttl_cs_repump_shut: TTLOut
+        self.setattr_device("dds_ch_rb_cool")
+        self.dds_ch_rb_cool: AD9910
+        self.setattr_device("dds_ch_rb_repump")
+        self.dds_ch_rb_repump: AD9910
+        self.setattr_device("dds_cpld_rb")
+        self.dds_cpld_rb: CPLD
+        self.setattr_device("ttl_rb_cool_shut")
+        self.ttl_rb_cool_shut: TTLOut
+        self.setattr_device("ttl_rb_repump_shut")
+        self.ttl_rb_repump_shut: TTLOut
     
     # --- In seq action funcs ---
 
@@ -599,8 +561,8 @@ class CsLightService(Fragment):
         This function can be used alone to just change the beam freq/amp
         without changing the state of the RF switches.
         """
-        self.dds_ch_cs_cool.set(self.cool_frequency.use(), amplitude=self.cool_dds_amp.use())
-        self.dds_ch_cs_repump.set(self.repump_frequency.use(), amplitude=self.repump_dds_amp.use())
+        self.dds_ch_rb_cool.set(self.cool_frequency.use(), amplitude=self.cool_dds_amp.use())
+        self.dds_ch_rb_repump.set(self.repump_frequency.use(), amplitude=self.repump_dds_amp.use())
 
     @kernel
     def device_setup(self):
@@ -619,12 +581,12 @@ class CsLightService(Fragment):
             self.apply_dds_settings()
         if pre_open_shutters:
             shutter_prefire = self.shutter_prefire.get()
-            self.ttl_cs_cool_shut.on()
-            self.ttl_cs_repump_shut.on()
+            self.ttl_rb_cool_shut.on()
+            self.ttl_rb_repump_shut.on()
             delay(shutter_prefire)
         # If the switch was already on, this a Noop
-        self.dds_ch_cs_cool.sw.on()
-        self.dds_ch_cs_repump.sw.on()
+        self.dds_ch_rb_cool.sw.on()
+        self.dds_ch_rb_repump.sw.on()
     
     @kernel
     def turn_light_off_now(self, close_shutters=True):
@@ -632,11 +594,11 @@ class CsLightService(Fragment):
         Turn the cool+repump beams off `now`. This function will close the shutters (if asked)
         and RF switches.
         """
-        self.dds_ch_cs_cool.sw.off()
-        self.dds_ch_cs_repump.sw.off()
+        self.dds_ch_rb_cool.sw.off()
+        self.dds_ch_rb_repump.sw.off()
         if close_shutters:
-            self.ttl_cs_cool_shut.off()
-            self.ttl_cs_repump_shut.off()
+            self.ttl_rb_cool_shut.off()
+            self.ttl_rb_repump_shut.off()
 
 class LowBFieldService(Fragment):
     """
@@ -646,10 +608,10 @@ class LowBFieldService(Fragment):
 
     def build_fragment(
         self,
-        EW_setpoint_default=CS_EW_SHIMS_V_MOT*V,
-        UD_setpoint_default=CS_UD_SHIMS_V_MOT*V,
-        NS_setpoint_default=CS_NS_SHIMS_V_MOT*V,
-        quad_setpoint_default=CS_QUAD_V_MOT*V,
+        EW_setpoint_default=RB_EW_SHIMS_V_MOT*V,
+        UD_setpoint_default=RB_UD_SHIMS_V_MOT*V,
+        NS_setpoint_default=RB_NS_SHIMS_V_MOT*V,
+        quad_setpoint_default=RB_QUAD_V_MOT*V,
     ):
         self.setattr_param("EW_setpoint",
                            FloatParam,
@@ -704,12 +666,12 @@ class LowBFieldService(Fragment):
         self.ttl_quad.off()
 
 
-class CsMOTLoadService(Fragment):
+class RbMOTLoadService(Fragment):
     def build_fragment(self):
         self.setattr_fragment("MOT_load_fields", LowBFieldService)
         self.MOT_load_fields: LowBFieldService
-        self.setattr_fragment("MOT_fluoresce", CsLightService)
-        self.MOT_fluoresce: CsLightService
+        self.setattr_fragment("MOT_fluoresce", RbLightService)
+        self.MOT_fluoresce: RbLightService
 
         self.setattr_device("core")
         self.core: Core
@@ -729,22 +691,20 @@ class CsMOTLoadService(Fragment):
         self.MOT_fluoresce.turn_light_off_now(close_shutters=True)
 
 
-class LoadCsMOTImage(ExpFragment):
+class LoadRbMOTImageMonolith(ExpFragment):
     def build_fragment(self):
-        self._live_imaging_initialised = False
-
         self.setattr_fragment("known_hardware_state", KnownHardwareState)
         self.known_hardware_state: KnownHardwareState
 
-        self.setattr_fragment("Cs_MOT_loader", CsMOTLoadService)
-        self.Cs_MOT_loader: CsMOTLoadService
+        self.setattr_fragment("Rb_MOT_loader", RbMOTLoadService)
+        self.Rb_MOT_loader: RbMOTLoadService
 
-        self.setattr_param("Cs_MOT_preload_time",
+        self.setattr_param("Rb_MOT_preload_time",
                            FloatParam,
                            "How long to load the MOT for before starting exposing the camera",
                            1.0*s,
                            min=1.0*ms,max=10.0*s)
-        self.Cs_MOT_preload_time:FloatParamHandle
+        self.Rb_MOT_preload_time:FloatParamHandle
 
         self.setattr_param("exposure_time",
                            FloatParam,
@@ -784,7 +744,7 @@ class LoadCsMOTImage(ExpFragment):
     def host_setup(self):
         super().host_setup()
         self._configure_camera()
-        _initialise_live_imaging_datasets(self)
+        _ensure_tweezer_roi_datasets(self)
 
     def host_cleanup(self):
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
@@ -793,7 +753,6 @@ class LoadCsMOTImage(ExpFragment):
 
     @rpc
     def camera_start_acquisition(self):
-        _set_live_image_valid(self, False)
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
         self.andor_ctrl.prepare()
         self.andor_ctrl.start_acquisition()
@@ -805,17 +764,17 @@ class LoadCsMOTImage(ExpFragment):
         finally:
             self.andor_ctrl.abort_acquisition(ignore_idle=True)
         self.mot_image.push(img)
-        _publish_live_image(self, img)
+        self.set_dataset("andor.image", img, broadcast=True)
 
     @kernel
     def rtio_events(self):
         self.core.break_realtime()
         delay(20.0 * ms)
         
-        self.Cs_MOT_loader.load_mot_on()
-        delay(self.Cs_MOT_preload_time.get())
+        self.Rb_MOT_loader.load_mot_on()
+        delay(self.Rb_MOT_preload_time.get())
         self.ttl_camera_exposure.pulse(self.exposure_time.get())
-        self.Cs_MOT_loader.load_mot_off()
+        self.Rb_MOT_loader.load_mot_off()
         self.known_hardware_state.safe_state.set_safe()
     
     @kernel
@@ -826,33 +785,33 @@ class LoadCsMOTImage(ExpFragment):
         self.camera_wait_read_and_publish(self.camera_timeout.get())
 
 
-LoadCsMOTImageExp = make_fragment_prepared_dashboard_scan_exp(
-    LoadCsMOTImage,
+LoadRbMOTImageMonolithExp = make_fragment_prepared_dashboard_scan_exp(
+    LoadRbMOTImageMonolith,
     max_rtio_underflow_retries=0,
 )
 
 
-class CsMolassesService(Fragment):
+class RbMolassesService(Fragment):
     def build_fragment(self):
         self.setattr_fragment(
             "molasses_fields",
             LowBFieldService,
-            CS_EW_SHIMS_V_MOLASSES*V,
-            CS_UD_SHIMS_V_MOLASSES*V,
-            CS_NS_SHIMS_V_MOLASSES*V,
+            RB_EW_SHIMS_V_MOLASSES*V,
+            RB_UD_SHIMS_V_MOLASSES*V,
+            RB_NS_SHIMS_V_MOLASSES*V,
             0.0*V,
         )
         self.molasses_fields: LowBFieldService
 
         self.setattr_fragment(
             "molasses_light",
-            CsLightService,
-            CS_COOL_DDS_FREQ_MHZ_MOLASSES*MHz,
-            CS_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
-            CS_COOL_DDS_ASF_MOLASSES,
-            CS_REPUMP_DDS_ASF_MOLASSES,
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_MOLASSES*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_MOLASSES,
+            RB_REPUMP_DDS_ASF_MOLASSES,
         )
-        self.molasses_light: CsLightService
+        self.molasses_light: RbLightService
 
     @kernel
     def molasses_on(self):
@@ -862,44 +821,44 @@ class CsMolassesService(Fragment):
         delay(0.5*ms)
         self.molasses_fields.turn_quad_off()
 
-class CsCoolingService(Fragment):
+class RbCoolingService(Fragment):
     def build_fragment(self):
         self.setattr_fragment(
             "cooling_fields",
             LowBFieldService,
-            CS_EW_SHIMS_V_IMAGING_COOLING*V,
-            CS_UD_SHIMS_V_IMAGING_COOLING*V,
-            CS_NS_SHIMS_V_IMAGING_COOLING*V,
+            RB_EW_SHIMS_V_IMAGING_COOLING*V,
+            RB_UD_SHIMS_V_IMAGING_COOLING*V,
+            RB_NS_SHIMS_V_IMAGING_COOLING*V,
             0.0*V,
         )
         self.cooling_fields: LowBFieldService
 
         self.setattr_fragment(
             "cooling_light",
-            CsLightService,
-            CS_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING*MHz,
-            CS_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
-            CS_COOL_DDS_ASF_TWEEZER_COOLING,
-            CS_REPUMP_DDS_ASF_TWEEZER_COOLING,
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_TWEEZER_COOLING*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_TWEEZER_COOLING,
+            RB_REPUMP_DDS_ASF_TWEEZER_COOLING,
         )
-        self.cooling_light: CsLightService
+        self.cooling_light: RbLightService
 
     @kernel
     def cooling_on(self):
         self.cooling_fields.set_setpoints()
         self.cooling_light.apply_dds_settings()
 
-class CsTweezerImageService(Fragment):
+class RbTweezerImageService(Fragment):
     def build_fragment(self):
         self.setattr_fragment(
             "imaging_light",
-            CsLightService,
-            CS_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE*MHz,
-            CS_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
-            CS_COOL_DDS_ASF_TWEEZER_IMAGE,
-            CS_REPUMP_DDS_ASF_TWEEZER_IMAGE,
+            RbLightService,
+            RB_COOL_DDS_FREQ_MHZ_TWEEZER_IMAGE*MHz,
+            RB_REPUMP_DDS_FREQ_MHZ_MOT*MHz,
+            RB_COOL_DDS_ASF_TWEEZER_IMAGE,
+            RB_REPUMP_DDS_ASF_TWEEZER_IMAGE,
         )
-        self.imaging_light: CsLightService
+        self.imaging_light: RbLightService
 
         self.setattr_param("exposure_time",
                            FloatParam,
@@ -920,33 +879,25 @@ class CsTweezerImageService(Fragment):
         self.imaging_light.turn_light_off_now(close_shutters=True)
 
 
-class LoadCsMOTToTweezersImage(ExpFragment):
+class LoadRbMOTToTweezersImageMonolith(ExpFragment):
     def build_fragment(self):
-        self._live_imaging_initialised = False
-
         self.setattr_fragment("known_hardware_state", KnownHardwareState)
         self.known_hardware_state: KnownHardwareState
 
-        self.setattr_fragment("tweezer_tone_mot", TweezerSUServoToneService,
-                              TWEEZER_MOT_SETPOINT)
-        self.tweezer_tone_mot: TweezerSUServoToneService
+        self.setattr_fragment("tweezer_tone", TweezerSUServoToneService)
+        self.tweezer_tone: TweezerSUServoToneService
 
-        self.setattr_fragment("Cs_MOT_loader", CsMOTLoadService)
-        self.Cs_MOT_loader: CsMOTLoadService
+        self.setattr_fragment("Rb_MOT_loader", RbMOTLoadService)
+        self.Rb_MOT_loader: RbMOTLoadService
 
-        self.setattr_fragment("Cs_molasses", CsMolassesService)
-        self.Cs_molasses: CsMolassesService
+        self.setattr_fragment("Rb_molasses", RbMolassesService)
+        self.Rb_molasses: RbMolassesService
 
+        self.setattr_fragment("Rb_cooling", RbCoolingService)
+        self.Rb_cooling: RbCoolingService
 
-        self.setattr_fragment("tweezer_tone_cool_im", TweezerSUServoToneService,
-                              TWEEZER_IMAGING_SETPOINT)
-        self.tweezer_tone_cool_im: TweezerSUServoToneService
-
-        self.setattr_fragment("Cs_cooling", CsCoolingService)
-        self.Cs_cooling: CsCoolingService
-
-        self.setattr_fragment("tweezer_imager", CsTweezerImageService)
-        self.tweezer_imager: CsTweezerImageService
+        self.setattr_fragment("tweezer_imager", RbTweezerImageService)
+        self.tweezer_imager: RbTweezerImageService
 
         self.setattr_param("mot_hold_time",
                            FloatParam,
@@ -975,7 +926,6 @@ class LoadCsMOTToTweezersImage(ExpFragment):
                            CAMERA_TIMEOUT,
                            min=1.0*ms,max=60.0*s)
         self.camera_timeout: FloatParamHandle
-
 
         self.setattr_result(
             "tweezers_image",
@@ -1121,7 +1071,7 @@ class LoadCsMOTToTweezersImage(ExpFragment):
     def host_setup(self):
         super().host_setup()
         self._configure_camera()
-        _initialise_live_imaging_datasets(self)
+        _ensure_tweezer_roi_datasets(self)
 
     def host_cleanup(self):
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
@@ -1130,7 +1080,6 @@ class LoadCsMOTToTweezersImage(ExpFragment):
 
     @rpc
     def camera_start_acquisition(self):
-        _set_live_image_valid(self, False)
         self.andor_ctrl.abort_acquisition(ignore_idle=True)
         self.andor_ctrl.prepare()
         self.andor_ctrl.start_acquisition()
@@ -1151,28 +1100,27 @@ class LoadCsMOTToTweezersImage(ExpFragment):
         self.tweezer_roi_bright.push(roi_bright)
         self.tweezer_roi_thresholds_applied.push(thresholds)
 
-        _publish_live_image(self, img)
+        self.set_dataset("andor.image", img, broadcast=True)
+        self.set_dataset(TWEEZER_ROI_COUNTS_DATASET, roi_counts, broadcast=True)
+        self.set_dataset(TWEEZER_ROI_BRIGHT_DATASET, roi_bright, broadcast=True)
 
     @kernel
     def rtio_events(self):
         self.core.break_realtime()
         delay(20.0 * ms)
 
-        self.tweezer_tone_mot.set_rf_iir(rf_sw=1, en_iir=1)
-        self.tweezer_tone_mot.set_setpoint()
-        # self.ttl_camera_exposure.on()
-        self.Cs_MOT_loader.load_mot_on()
+        self.tweezer_tone.turn_on()
+        self.Rb_MOT_loader.load_mot_on()
         delay(self.mot_hold_time.use())
-        # self.ttl_camera_exposure.off()
 
-        self.Cs_molasses.molasses_on()
+        self.Rb_molasses.molasses_on()
         delay(self.molasses_time.use())
-        self.tweezer_tone_cool_im.set_setpoint()
-        self.Cs_cooling.cooling_on()
+
+        self.Rb_cooling.cooling_on()
         delay(self.cooling_time.use())
 
         self.tweezer_imager.image_atoms(exposure_trigger=True)
-        self.tweezer_tone_mot.set_rf_iir(rf_sw=0, en_iir=0)
+        self.tweezer_tone.turn_off()
         delay(5*ms)
 
     @kernel
@@ -1183,18 +1131,18 @@ class LoadCsMOTToTweezersImage(ExpFragment):
         self.camera_wait_read_and_publish(self.camera_timeout.get())
 
 
-LoadCsMOTToTweezersImageExp = make_fragment_prepared_dashboard_scan_exp(
-    LoadCsMOTToTweezersImage,
+LoadRbMOTToTweezersImageMonolithExp = make_fragment_prepared_dashboard_scan_exp(
+    LoadRbMOTToTweezersImageMonolith,
     max_rtio_underflow_retries=0,
 )
 
 
-class LoadCsMOTToTweezersImageStatistics(ExpFragment):
+class LoadRbMOTToTweezersImageStatisticsMonolith(ExpFragment):
     """Repeat the tweezer-image shot and publish one probability point."""
 
     def build_fragment(self):
-        self.setattr_fragment("shot", LoadCsMOTToTweezersImage, detached=True)
-        self.shot: LoadCsMOTToTweezersImage
+        self.setattr_fragment("shot", LoadRbMOTToTweezersImageMonolith, detached=True)
+        self.shot: LoadRbMOTToTweezersImageMonolith
 
         self.repeat_scan = prepare_child_scan(
             self,
@@ -1282,10 +1230,10 @@ class LoadCsMOTToTweezersImageStatistics(ExpFragment):
             channel.push(outputs[name])
 
 
-class LoadCsMOTToTweezersImageStatisticsDashboard(
-    LoadCsMOTToTweezersImageStatistics
+class LoadRbMOTToTweezersImageStatisticsMonolithDashboard(
+    LoadRbMOTToTweezersImageStatisticsMonolith
 ):
-    """Dashboard wrapper for scanning averaged tweezer-loading statistics."""
+    """Dashboard wrapper for archived monolithic Rb loading statistics."""
 
     def get_always_shown_params(self):
         shown = super().get_always_shown_params()
@@ -1295,14 +1243,16 @@ class LoadCsMOTToTweezersImageStatisticsDashboard(
             self.shot.molasses_time,
             self.shot.cooling_time,
             self.shot.camera_timeout,
-            self.shot.Cs_cooling.cooling_light.cool_frequency,
-            self.shot.Cs_cooling.cooling_light.cool_dds_amp,
+            self.shot.Rb_cooling.cooling_light.cool_frequency,
+            self.shot.Rb_cooling.cooling_light.cool_dds_amp,
             self.shot.tweezer_imager.exposure_time,
         ]
         return shown
 
 
-LoadCsMOTToTweezersImageStatisticsExp = make_fragment_prepared_dashboard_scan_exp(
-    LoadCsMOTToTweezersImageStatisticsDashboard,
-    max_rtio_underflow_retries=0,
+LoadRbMOTToTweezersImageStatisticsMonolithExp = (
+    make_fragment_prepared_dashboard_scan_exp(
+        LoadRbMOTToTweezersImageStatisticsMonolithDashboard,
+        max_rtio_underflow_retries=0,
+    )
 )

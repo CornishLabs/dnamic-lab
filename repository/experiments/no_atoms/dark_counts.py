@@ -1,5 +1,18 @@
-# Write a sequence that changes the temperature, gives it time to settle,
-# then returns the average dark counts. This requires the shutter to be closed.
+"""No-atom experiment: measure camera dark counts at a selected temperature.
+
+Physical setup required:
+    Ensure no external light can reach the camera. The experiment commands the Andor
+    shutter closed, but any uncontrolled light path must also be blocked.
+
+Restoration required:
+    Remove any temporary external beam block and restore the intended camera light
+    path before returning to imaging experiments.
+
+Leaves hardware:
+    The cooler remains on at the selected temperature and the camera shutter remains
+    in permanently-closed mode. Camera ROI, trigger, and exposure settings are not
+    restored automatically.
+"""
 
 from ndscan.experiment import *
 import numpy as np
@@ -8,6 +21,11 @@ import time
 from collections import deque
 
 class DarkCounts(ExpFragment):
+    """Measure dark counts; the camera must be in an optically dark configuration.
+
+    See the module-level physical-setup and hardware-state warnings before running.
+    """
+
     def build_fragment(self):
         self.setattr_param("target_temperature",
                            IntParam,

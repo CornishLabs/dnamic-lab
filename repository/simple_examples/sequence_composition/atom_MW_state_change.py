@@ -1,3 +1,5 @@
+"""Legacy simulated example of shot composition, repetition, and ndscan analysis."""
+
 from ndscan.experiment import (
     ExpFragment, kernel, rpc,
     FloatParam, IntParam,

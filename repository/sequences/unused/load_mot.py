@@ -1,3 +1,5 @@
+"""Archived early ndscan MOT-loading implementation."""
+
 from contextlib import suppress
 
 from artiq.coredevice.ad9910 import AD9910

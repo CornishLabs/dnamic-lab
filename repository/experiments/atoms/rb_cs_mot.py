@@ -1,4 +1,4 @@
-"""Sequentially load Rb and Cs, then cool and image each species.
+"""Atom experiment: load Rb and Cs sequentially, then image each species.
 
 The chronological kernel is intentionally short.  Hardware ownership and safety live
 in ``LabEnvironment``; species settings and transitions live in the parts modules; and
@@ -92,9 +92,9 @@ class LoadRbThenCsAndImageBoth(ExpFragment):
     @kernel
     def load_both_species(self):
         """Load sequentially, leaving both trap servos on and resonant light off."""
-        self.load_rb.run_to_dark_hold()
-        # run_to_dark_hold() leaves 817 nm on while closing the Rb light shutters.
-        self.load_cs.run_to_dark_hold()
+        self.load_rb.run(turn_light_off=True)
+        # The explicit exit option leaves 817 nm on while closing the Rb shutters.
+        self.load_cs.run(turn_light_off=True)
 
     @kernel
     def run_once(self):
@@ -106,8 +106,14 @@ class LoadRbThenCsAndImageBoth(ExpFragment):
 
         # The continuously armed camera places these two exposures into its circular
         # buffer in order.  No host RPC interrupts the RTIO sequence between them.
-        self.readout_rb.run_from_dark_hold()
-        self.readout_cs.run_from_dark_hold()
+        self.readout_rb.run(
+            turn_light_on=True,
+            turn_light_off=True,
+        )
+        self.readout_cs.run(
+            turn_light_on=True,
+            turn_light_off=True,
+        )
 
         # Both exposures are complete, so make the full apparatus safe before draining
         # and processing both buffered images.  Lifecycle cleanup repeats this safely.

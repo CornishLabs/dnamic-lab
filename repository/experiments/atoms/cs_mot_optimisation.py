@@ -1,4 +1,4 @@
-"""Two-stage Cs MOT loading and Bayesian optimisation.
+"""Atom experiment: two-stage Cs MOT loading and Bayesian optimisation.
 
 The physical shot is deliberately short to read: establish a bulk MOT, move through
 an independently parameterised compressed-MOT stage, enter the existing molasses
@@ -110,8 +110,11 @@ class CsTwoStageMOTLoadingShot(ExpFragment):
         self.core.break_realtime()
         delay(20.0 * ms)
 
-        self.load_cs.run()
-        self.image_cs.run_from_molasses()
+        self.load_cs.run(turn_light_off=False)
+        self.image_cs.run(
+            turn_light_on=False,
+            turn_light_off=True,
+        )
 
         # Match the established Cs loading shot: stop the loop, allow its output to
         # settle, then return the complete apparatus to the shared safe state before
@@ -187,6 +190,9 @@ class CsTwoStageMOTStatistics(_CsTwoStageMOTStatistics):
 CsTwoStageMOTLoadingCheckExp = make_fragment_prepared_dashboard_scan_exp(
     CsTwoStageMOTStatistics,
     max_rtio_underflow_retries=0,
+)
+CsTwoStageMOTLoadingCheckExp.__doc__ = (
+    "Check two-stage Cs MOT loading once at the dashboard settings."
 )
 
 
@@ -638,4 +644,7 @@ OptimiseCsTwoStageMOTLoadingExp = make_fragment_prepared_scan_exp(
     CsTwoStageMOTStatistics,
     _make_cs_two_stage_bo_request,
     max_rtio_underflow_retries=0,
+)
+OptimiseCsTwoStageMOTLoadingExp.__doc__ = (
+    "Optimise two-stage Cs MOT loading with Gaussian-process optimisation."
 )

@@ -1,4 +1,4 @@
-"""Minimal example of binding a transition to the stages on either side.
+"""Current example of binding a transition to the stages on either side.
 
 The experiment has three independently adjustable quantities:
 
@@ -63,7 +63,18 @@ class _TweezerSetpointStage(UsesLabRTIOHardware):
 
     @kernel
     def run(self):
-        """Set the target and leave the enabled servo at that target."""
+        """Set and leave the servo at this stage's target.
+
+        Requires:
+            The Cs tweezer servo is enabled.
+
+        During:
+            Programs ``tweezer_setpoint`` as the closed-loop target.
+
+        Leaves:
+            The servo enabled at ``tweezer_setpoint``. The target remains latched when
+            this method returns.
+        """
         self.hardware.set_cs_tweezer_setpoint(self.tweezer_setpoint.use())
 
 
@@ -90,9 +101,13 @@ class TweezerRampAtoB(UsesLabRTIOHardware):
     Requires:
         The Cs tweezer servo is enabled, normally at ``start_setpoint``.
 
-    Guarantees:
-        The servo target is ``end_setpoint`` and the RTIO cursor has advanced by
+    During:
+        Linearly changes the target from ``start_setpoint`` to ``end_setpoint`` over
         exactly ``duration``.
+
+    Leaves:
+        The servo enabled at ``end_setpoint``. The endpoint remains latched when this
+        method returns.
     """
 
     def build_fragment(self, hardware):

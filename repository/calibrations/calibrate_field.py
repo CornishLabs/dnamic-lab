@@ -8,7 +8,9 @@ from ndscan.experiment import (
 )
 
 import oitg
-from repository.sequences.atom_MW_state_change import MultiShotAnalysed
+from repository.simple_examples.sequence_composition.atom_MW_state_change import (
+    MultiShotAnalysed,
+)
 
 class ScanFrequency(SubscanExpFragment):
     def build_fragment(self):

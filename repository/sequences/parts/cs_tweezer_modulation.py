@@ -50,10 +50,6 @@ SERVO_RELOCK_TIME = 1.0 * ms
 class CsTweezerRAMModulation(UsesLabRTIOHardware):
     """Modulate around the Cs servo's current, freshly held DDS amplitude.
 
-    Entry contract: the Cs servo is enabled and settled, and the resonant Cs light is
-    off.  Exit contract: the DDS is back in single-tone/QSPI mode and the Cs servo is
-    again closed at the same experimental setpoint.
-
     ``depth`` is fractional *DDS amplitude* modulation.  It is not necessarily the
     same fractional modulation of optical power through the AOM and RF chain.
     """
@@ -203,7 +199,23 @@ class CsTweezerRAMModulation(UsesLabRTIOHardware):
 
     @kernel
     def run(self):
-        """Play a sine about the current servo output, then restore the servo."""
+        """Play a sine about the current servo output, then restore the servo.
+
+        Requires:
+            The Cs servo is enabled and settled, and the resonant Cs light is off.
+            :meth:`device_setup` has prepared profile 7 for the RAM handover.
+
+        During:
+            Holds the current servo output, temporarily hands the Cs DDS from QSPI to
+            slow SPI, uploads and plays the amplitude-RAM waveform for a whole number
+            of cycles close to ``duration``, then returns through the held amplitude.
+
+        Leaves:
+            The DDS back in single-tone/QSPI mode on profile 7, the RF output on, and
+            the Cs servo closed at the same experimental setpoint after its relock
+            delay. Resonant-light state is unchanged. No earlier hardware state beyond
+            this explicit contract is restored automatically.
+        """
         frequency = self.frequency.use()
         depth = self.depth.use()
         requested_duration = self.duration.use()

@@ -6,15 +6,15 @@ files: those files contain several generations of ideas, and an older pattern ma
 be present because it runs useful experiments rather than because it is the pattern to
 copy.
 
-The immediate reference implementations are `cs_mot_refactored.py`,
-`rb_mot_refactored.py`, and the composed `rb_cs_mot_refactored.py`.  The one current
-apparatus owner and the standard experiment lifecycle both live in
+The immediate reference implementations are `repository/experiments/atoms/cs_mot.py`,
+`rb_mot.py`, and the composed `rb_cs_mot.py`. The one current apparatus owner and the
+standard experiment lifecycle both live in
 `sequences/parts/lab_hardware.py`; species settings, stages, and composed operations
 live in `sequences/parts/cs_mot.py` and `sequences/parts/rb_mot.py`; shared camera,
 live-slot, ROI, and occupation-statistics behaviour lives in
-`sequences/parts/imaging.py`.  The original `cs_mot.py`, `rb_mot.py`, and other
-sequences remain valuable records of working hardware behaviour while they are
-migrated.
+`sequences/parts/imaging.py`. Older implementations are retained under
+`sequences/unused/` as behavioural and historical references, but are not patterns to
+copy into new experiments.
 
 ## What we want experiment code to feel like
 
@@ -58,7 +58,7 @@ of shots may use. Its name marks a deliberate boundary: host-side controllers,
 datasets, and analysis do not belong to it. This follows the real apparatus lifecycle:
 initialising one Zotino or SU-Servo channel has board-wide consequences, and
 experiments do not run concurrently in the lab. It declares the device handles once
-and provides small kernel-safe actions such as:
+and provides kernel-safe actions where they add hardware knowledge, such as:
 
 ```text
 program_rb_light(...)
@@ -73,6 +73,20 @@ accept explicit values supplied by the experimental layer. This prevents the phy
 hardware object from deciding which of several MOT, molasses, cooling, or imaging
 settings is currently meaningful.
 
+Not every device operation needs a forwarding method. A stage may directly call a
+public handle on the borrowed owner when the action is one transparent primitive:
+
+```python
+self.hardware.ttl_quad.off()
+self.hardware.ttl_camera_exposure.on()
+```
+
+Keep a hardware helper when it adds calibration, profile/channel selection,
+multi-device coordination, timing, atomic updates, safety ordering, or another
+non-obvious invariant. For example, `set_cs_tweezer_setpoint()` converts volts to the
+correct SU-Servo offset and selects the 1066 nm channel/profile, while
+`turn_cs_light_on()` coordinates shutters, a prefire delay, and two RF switches.
+
 Both tweezer channels are therefore initialised with zero demand. Their MOT and
 cooling/imaging stages each own a `tweezer_setpoint` parameter and program it when
 entering that stage. Equal defaults do not couple those parameters. The shared RTIO
@@ -81,9 +95,9 @@ full scale.
 
 Parts receive this same owner directly as an ordinary, non-owning Python reference.
 Holding that reference is not hardware ownership: the part does not call
-`setattr_device()`, initialise a board, or independently clean it up.  Explicit species
-names make calls easy to understand and search for, without a second layer which
-forwards or renames the hardware methods.
+`setattr_device()`, initialise a board, or independently clean it up. Explicit species
+names make non-trivial calls easy to understand and search for, without a second layer
+which only forwards or renames hardware operations.
 
 A part should still call only the operations needed to do its job.  This is a coding
 rule rather than an interface restriction; in this small shared codebase the simpler
@@ -184,17 +198,45 @@ shot, its statistical wrapper, or the final safe cleanup.
 A stage combines settings with the capabilities needed to apply them. Its method name
 and docstring must make its state contract clear.
 
-Use a name such as `establish()` only when the operation establishes all of its own
-preconditions from the documented shot boundary. Use a directional name such as
-`enter_from_mot()` when it deliberately relies on state left by the preceding stage.
+A stage's `run(...)` method executes the complete timed interval and consumes all
+parameters owned by that stage, including `duration`. A composition chooses the order
+of its children but should not call `delay(child.duration.use())` on their behalf.
+Parameter-only `*Settings` fragments are the deliberate exception: the containing
+stage consumes their values.
 
-Directional transitions are useful and efficient; hidden assumptions are not. A
-transition docstring should state:
+RTIO outputs are latched. Returning from `run(...)` does not restore the state which
+existed before the call, and a `delay(...)` only advances the RTIO cursor. In this
+codebase, `run(...)` therefore means “establish this stage and spend its duration
+there”, not “temporarily apply this stage and clean it up afterwards”. Any cleanup or
+transition at the end must be explicit.
+
+Small non-scannable composition choices are explicit boolean arguments, passed by
+keyword:
+
+```python
+self.cooling.run(
+    turn_light_on=False,
+    turn_light_off=False,
+)
+```
+
+This makes the relevant hardware state visible at the higher-order call site without
+creating a separate method for every valid combination. Use a directional name such
+as `run_from_dark_hold()` only when the alternative is a substantially different
+transition which cannot be expressed clearly as a small set of orthogonal options.
+
+Hidden assumptions are still not acceptable. A stage or transition docstring should
+state:
 
 ```text
 Requires: what may be assumed on entry.
-Guarantees: what is true on successful return.
+During: what state is established for the timed interval.
+Leaves: what remains latched after the method returns.
 ```
+
+The `Leaves` section should explicitly say whether light, servos, fields, enables, and
+trigger TTLs remain on or off. It is often useful to finish with “No previous hardware
+state is restored automatically.”
 
 ### Part
 
@@ -375,19 +417,25 @@ The parts directory is intended to become the canonical library for:
 - Generic shot/statistics wrappers where their semantics are independent of one
   particular experiment.
 
-Top-level files in `repository/sequences` should increasingly contain experiment
-recipes: which parts are composed, which results are published, and which scan or
-optimisation request is offered to the dashboard.
+Runnable recipes belong in `repository/experiments/atoms` or
+`repository/experiments/no_atoms`: they specify which parts are composed, which
+results are published, and which scan or optimisation request is offered to the
+dashboard. `repository/sequences` contains the reusable parts and archived
+implementations rather than being a mixed entry-point directory.
 
-`parts/initialiser.py` is an older whole-device-database discovery approach. Its broad
-`safe_off()` operation is useful historical context and may remain useful as an
-explicit lab-wide reset experiment. The composable-shot path instead uses an explicit
-`LabRTIOHardware` list: broad enough to initialise the current apparatus coherently, but
-small and readable enough that every output and safe value is deliberate.
+`unused/parts/initialiser.py` is an older whole-device-database discovery approach.
+Its broad `safe_off()` operation is useful historical context and may remain useful as
+an explicit lab-wide reset experiment. The composable-shot path instead uses an
+explicit `LabRTIOHardware` list: broad enough to initialise the current apparatus
+coherently, but small and readable enough that every output and safe value is
+deliberate.
 
 ## Parameter rules
 
 - Put a parameter at the first layer where it is experimentally meaningful.
+- A stage must consume every parameter it owns during its complete `run(...)`.
+  Transition-only settings belong to the composition which performs that transition,
+  rather than remaining as unused parameters on other instances of the stage.
 - Do not introduce parameters solely to make a generic hardware method convenient.
 - Do not make safety values scannable.
 - Keep independently meaningful stage values independent, even when they share a
@@ -399,12 +447,12 @@ small and readable enough that every output and safe value is deliberate.
 
 ## Reading existing code
 
-Until migration is complete:
+When consulting older code:
 
 - Treat working legacy sequences as behavioural references, especially for device
   ordering, timing, and safety details.
-- Treat the two `*_mot_refactored.py` files and their corresponding parts modules as
-  the current architectural prototype.
+- Treat the recipes in `repository/experiments/atoms/` and their corresponding
+  sequence-parts modules as the current architecture.
 - Do not assume that a pattern is recommended merely because it occurs in several old
   files; duplication may reflect their shared history.
 - When replacing a working implementation, preserve its RTIO behaviour first and make
@@ -418,16 +466,16 @@ Until migration is complete:
 2. `LabEnvironment` now owns the current Rb/Cs hardware once. Species settings, stages,
    and operations receive that hardware by non-owning reference; they remain separate
    modules and are not forced through a symmetric experimental implementation.
-3. The refactored Cs and Rb experiments are thin consumers of those parts and the
-   shared `AtomImageReadout` fragment. `rb_cs_mot_refactored.py` demonstrates sequential
-   composition with one fixed camera configuration and two image slots. Continue
+3. The current Cs and Rb experiments are thin consumers of those parts and the shared
+   `AtomImageReadout` fragment. `repository/experiments/atoms/rb_cs_mot.py`
+   demonstrates sequential composition with one fixed camera configuration and two
+   image slots. Continue
    validating scans, nested shot repetition, failure cleanup, and scheduler
    pause/resume on hardware.
-4. Migrate the working `cs_mot.py` experiments onto the same parts, then remove their
-   duplicate hardware and safe-state classes.
-5. Migrate the working `rb_mot.py` experiments in the same way.  Extract further common
-   physical capabilities only where that reduces duplication without hiding important
-   hardware differences.
+4. The superseded monolithic Cs and Rb implementations are retained as
+   `unused/cs_mot_monolith.py` and `unused/rb_mot_monolith.py`.
+5. Extract further common physical capabilities only where that reduces duplication
+   without hiding important hardware differences.
 6. Consider an ndscan non-owning fragment-reference API once the desired usage has
    been demonstrated locally.
 

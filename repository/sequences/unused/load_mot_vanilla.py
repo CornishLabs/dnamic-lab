@@ -1,3 +1,5 @@
+"""Archived early vanilla-ARTIQ MOT-loading implementation."""
+
 from contextlib import suppress
 
 from artiq.experiment import *
