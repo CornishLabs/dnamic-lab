@@ -22,9 +22,9 @@ from .lab_hardware import UsesLabRTIOHardware
 # Experiment defaults
 # -----------------------------------------------------------------------------
 
-TWEEZER_MOT_SETPOINT = 6.567
-TWEEZER_TWO_STAGE_MOT_SETPOINT = 6.50
-TWEEZER_IMAGING_SETPOINT = 5.65
+TWEEZER_MOT_SETPOINT = 6.5
+TWEEZER_TWO_STAGE_MOT_SETPOINT = 6.5
+TWEEZER_IMAGING_SETPOINT = 5.7
 TWEEZER_SPILL_SETPOINT = 3.5
 
 SHUTTER_PREFIRE = 10.0 * ms
@@ -94,23 +94,23 @@ COMPRESSED_MOT_SHIM_DEFAULTS = ShimDefaults(
 COMPRESSED_MOT_QUAD_DEFAULT = 8.50 * V
 
 MOLASSES_LIGHT_DEFAULTS = LightDefaults(
-    cool_frequency=114.2 * MHz,
+    cool_frequency=118.0 * MHz,
     repump_frequency=MOT_LIGHT_DEFAULTS.repump_frequency,
-    cool_amplitude=0.58,
+    cool_amplitude=0.62,
     repump_amplitude=0.37,
 )
-MOLASSES_SHIM_DEFAULTS = ShimDefaults(ew=-0.15 * V, ud=1.05 * V, ns=0.5 * V)
+MOLASSES_SHIM_DEFAULTS = ShimDefaults(ew=-0.13 * V, ud=1.05 * V, ns=0.07 * V)
 
 COOLING_LIGHT_DEFAULTS = LightDefaults(
-    cool_frequency=119.0 * MHz,
+    cool_frequency=121.8 * MHz,
     repump_frequency=MOT_LIGHT_DEFAULTS.repump_frequency,
-    cool_amplitude=0.6,
+    cool_amplitude=0.62,
     repump_amplitude=0.2,
 )
-COOLING_SHIM_DEFAULTS = ShimDefaults(ew=-0.15 * V, ud=1.15 * V, ns=0.5 * V)
+COOLING_SHIM_DEFAULTS = ShimDefaults(ew=-0.13 * V, ud=1.05 * V, ns=0.07 * V)
 
 IMAGING_LIGHT_DEFAULTS = LightDefaults(
-    cool_frequency=105.0 * MHz,
+    cool_frequency=108.0 * MHz,
     repump_frequency=MOT_LIGHT_DEFAULTS.repump_frequency,
     cool_amplitude=0.58,
     repump_amplitude=0.2,
@@ -136,6 +136,7 @@ class _LightSettings(Fragment):
             defaults.cool_frequency,
             min=60.0 * MHz,
             max=160.0 * MHz,
+            unit="MHz",
         )
         self.cool_frequency: FloatParamHandle
 
@@ -146,6 +147,7 @@ class _LightSettings(Fragment):
             defaults.repump_frequency,
             min=30.0 * MHz,
             max=130.0 * MHz,
+            unit="MHz",
         )
         self.repump_frequency: FloatParamHandle
 
@@ -290,6 +292,7 @@ class CsMOTStage(UsesLabRTIOHardware):
             self.QUAD_DEFAULT,
             min=0.0 * V,
             max=10.0 * V,
+            unit="V"
         )
         self.quad_setpoint: FloatParamHandle
 
@@ -300,6 +303,7 @@ class CsMOTStage(UsesLabRTIOHardware):
             self.TWEEZER_DEFAULT,
             min=0.0,
             max=10.0,
+            unit="V",
         )
         self.tweezer_setpoint: FloatParamHandle
 
@@ -310,16 +314,18 @@ class CsMOTStage(UsesLabRTIOHardware):
             SHUTTER_PREFIRE,
             min=0.0 * ms,
             max=200.0 * ms,
+            unit="ms"
         )
         self.shutter_prefire: FloatParamHandle
 
         self.duration = self.setattr_param(
             "duration",
             FloatParam,
-            "How long to hold the MOT before transfer",
+            "How long to hold the MOT loading",
             self.DURATION_DEFAULT,
             min=1.0 * ms,
             max=10.0 * s,
+            unit="ms"
         )
         self.duration: FloatParamHandle
 
@@ -402,20 +408,18 @@ class CsMolassesStage(UsesLabRTIOHardware):
 
     @kernel
     def enter_from_mot(self):
-        self.hardware.set_fields_with_quad_demand_off(
-            self.shims.ew_setpoint.use(),
-            self.shims.ud_setpoint.use(),
-            self.shims.ns_setpoint.use(),
-        )
-        delay(0.5 * ms)
         self.hardware.program_cs_light(
             self.light.cool_frequency.use(),
             self.light.repump_frequency.use(),
             self.light.cool_dds_amp.use(),
             self.light.repump_dds_amp.use(),
         )
-        delay(0.5 * ms)
         self.hardware.turn_quad_off()
+        self.hardware.set_fields_with_quad_demand_off(
+            self.shims.ew_setpoint.use(),
+            self.shims.ud_setpoint.use(),
+            self.shims.ns_setpoint.use(),
+        )
 
 
 class CsCoolingStage(UsesLabRTIOHardware):
