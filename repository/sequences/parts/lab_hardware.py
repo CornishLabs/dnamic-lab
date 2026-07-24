@@ -360,6 +360,8 @@ class LabRTIOHardware(Fragment):
 
     @kernel
     def turn_cs_light_on(self, shutter_prefire):
+        """Shutters turn on signal sent *now*, cool+repump come on after shutter_prefire.
+         Advances the timeline by shutter_prefire."""
         self.ttl_cs_cool_shut.on()
         self.ttl_cs_repump_shut.on()
         delay(shutter_prefire)
